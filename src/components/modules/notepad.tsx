@@ -28,7 +28,7 @@ export const Notepad: React.FC<NotepadProps> = ({ content, onChange }) => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      {/* Toolbar - Hardcoded Colors for Dark Mode Support */}
+      {/* Toolbar */}
       <div style={{ 
           padding: '5px', borderBottom: '1px solid #ccc', background: '#f0f0f0', 
           display: 'flex', gap: '5px', justifyContent: 'space-between', color: '#000' 
@@ -52,9 +52,9 @@ export const Notepad: React.FC<NotepadProps> = ({ content, onChange }) => {
       </div>
 
       {/* Content Area */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '10px', background: 'white' }}>
+      <div style={{ flex: 1, overflow: 'hidden', position: 'relative', background: 'white' }}>
         {isPreview ? (
-            <div className="markdown-body" style={{ fontSize: '14px', lineHeight: '1.5', color: '#000' }}>
+            <div className="markdown-body" style={{ padding: '10px', height: '100%', overflowY: 'auto', fontSize: '14px', lineHeight: '1.5', color: '#000' }}>
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>
                     {content || '*No content*'}
                 </ReactMarkdown>
@@ -68,8 +68,20 @@ export const Notepad: React.FC<NotepadProps> = ({ content, onChange }) => {
                 onChange={(e) => onChange(e.target.value)}
                 onMouseDown={(e) => e.stopPropagation()} 
                 style={{
-                    width: '100%', height: '100%', resize: 'none', border: 'none', 
-                    outline: 'none', fontFamily: 'monospace', fontSize: '13px', color: '#333', background: 'white'
+                    width: '100%', 
+                    height: '100%', 
+                    padding: '10px',
+                    resize: 'none', 
+                    border: 'none', 
+                    outline: 'none', 
+                    fontFamily: 'monospace', 
+                    fontSize: '13px', 
+                    color: '#333', 
+                    background: 'white',
+                    overflowX: 'hidden', 
+                    overflowY: 'auto',
+                    whiteSpace: 'pre-wrap', 
+                    wordWrap: 'break-word' 
                 }}
             />
         )}
@@ -78,7 +90,6 @@ export const Notepad: React.FC<NotepadProps> = ({ content, onChange }) => {
   );
 };
 
-// Hardcoded white background and dark text to prevent dark mode transparency issues
 const btnStyle = {
     border: '1px solid #999', background: '#fff', borderRadius: '3px', 
     cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', minWidth: '24px'
