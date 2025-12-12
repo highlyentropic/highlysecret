@@ -34,7 +34,6 @@
   gap: 10px;
   z-index: 10;
   box-shadow: 0 2px 5px rgba(0,0,0,0.05);
-  /* FIX: Force dark text for toolbar items despite global dark mode */
   color: #333; 
 }
 
@@ -45,7 +44,6 @@
     transform: scale(0.95);
 }
 
-/* FIX: Specific styling for the label under icons */
 .droppable-element span {
     color: #555;
     font-weight: 500;
@@ -122,6 +120,49 @@
   outline: none;
 }
 
+/* --- TODO LIST STYLES --- */
+.todo-item-btn {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  background: #f8f9fa; /* Distinctive background */
+  border: 1px solid #e9ecef;
+  border-radius: 6px; /* Slightly rounded corners */
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: left;
+  color: #333;
+}
+
+.todo-item-btn:hover {
+  background: #e2e6ea;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+.todo-color-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 8px;
+  border: 1px solid rgba(0,0,0,0.1);
+}
+
+.todo-text {
+  flex: 1;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.todo-text.done {
+  text-decoration: line-through;
+  color: #999;
+}
+
 /* --- MODAL STYLES --- */
 .modal-overlay {
   position: fixed;
@@ -145,7 +186,6 @@
   display: flex; 
   flex-direction: column; 
   gap: 12px;
-  /* FIX: Reset text color to dark for the white modal */
   color: #333;
 }
 
@@ -158,11 +198,12 @@
     font-size: 13px; 
 }
 
-/* FIX: Explicit styling for Modal Inputs to override dark mode defaults */
+/* General Input Styling in Modals */
 .modal-content input[type="text"],
 .modal-content input[type="date"],
 .modal-content input[type="time"],
-.modal-content input[type="color"] {
+.modal-content textarea,
+.modal-content select {
     padding: 8px;
     border: 1px solid #ccc;
     border-radius: 4px;
@@ -170,9 +211,22 @@
     color: #333;
     font-size: 14px;
     outline: none;
+    width: 100%;
+    box-sizing: border-box;
 }
 
-.modal-content input:focus {
+.modal-content input[type="color"] {
+    width: 100%;
+    height: 40px;
+    padding: 2px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    background: white;
+}
+
+.modal-content input:focus,
+.modal-content select:focus,
+.modal-content textarea:focus {
     border-color: #007bff;
     box-shadow: 0 0 0 2px rgba(0,123,255,0.2);
 }
@@ -183,6 +237,17 @@
 }
 
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 10px; }
+
+/* Category Tags */
+.category-tag {
+    display: inline-block;
+    padding: 2px 6px;
+    background: #e9ecef;
+    border-radius: 4px;
+    font-size: 10px;
+    color: #555;
+    margin-right: 5px;
+}
 
 /* --- EVENTS LIST STYLES --- */
 .event-row {

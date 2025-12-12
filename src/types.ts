@@ -8,3 +8,13 @@ export interface CalendarEvent {
   notify: boolean;
   color: string;
 }
+
+export interface TodoItem {
+  id: string;
+  text: string;
+  done: boolean;
+  description?: string;
+  color?: string; // Hex code
+  category?: string;
+  originModuleId: string; // To track where it was created
+}

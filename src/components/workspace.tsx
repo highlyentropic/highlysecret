@@ -1,15 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import RGL, { WidthProvider, Layout } from 'react-grid-layout';
 import _ from 'lodash';
-// FIX: Updated imports to match lowercase filenames
 import { Notepad } from './modules/notepad';
 import { Clock } from './modules/clock';
 import { Whiteboard } from './modules/whiteboard';
 import { Calendar } from './modules/calendar';
 import { TodoList } from './modules/todolist';
-// FIX: Split import to handle type-only export
 import { EventsList } from './modules/eventslist';
-import type { CalendarEvent } from './modules/eventslist';
+import type { CalendarEvent, TodoItem } from '../types';
 import { StickyNote } from './modules/stickynote'; 
 
 import { FaRegStickyNote, FaRegClock, FaPencilAlt, FaCalendarAlt, FaCheckSquare, FaBug, FaList } from 'react-icons/fa';
@@ -43,6 +41,7 @@ interface ModuleItem {
   title?: string;
   content?: string;
   clockMode?: 'analog' | 'digital';
+  linkedCategory?: string; // For Todo modules
 }
 
 export const Workspace = () => {
@@ -57,6 +56,10 @@ export const Workspace = () => {
   // SHARED EVENT STATE
   const [globalEvents, setGlobalEvents] = useState<CalendarEvent[]>([]);
   
+  // SHARED TODO STATE
+  const [globalTodos, setGlobalTodos] = useState<TodoItem[]>([]);
+  const [todoCategories, setTodoCategories] = useState<string[]>([]);
+
   // MODAL STATE
   const [showModal, setShowModal] = useState(false);
   const [modalData, setModalData] = useState<Partial<CalendarEvent>>({});
@@ -142,6 +145,41 @@ export const Workspace = () => {
     setGlobalEvents(prev => prev.map(e => e.id === id ? { ...e, notify: !e.notify } : e));
   };
 
+  // --- TODO LOGIC ---
+
+  const addTodo = (text: string, moduleId: string, category?: string) => {
+      const newTodo: TodoItem = {
+          id: Date.now().toString(),
+          text,
+          done: false,
+          originModuleId: moduleId,
+          category: category || undefined,
+          color: '#333333'
+      };
+      setGlobalTodos([...globalTodos, newTodo]);
+  };
+
+  const updateTodo = (id: string, updates: Partial<TodoItem>) => {
+      setGlobalTodos(prev => prev.map(t => t.id === id ? { ...t, ...updates } : t));
+  };
+
+  const deleteTodo = (id: string) => {
+      setGlobalTodos(prev => prev.filter(t => t.id !== id));
+  };
+
+  const addCategory = (cat: string) => {
+      if (cat && !todoCategories.includes(cat)) {
+          setTodoCategories([...todoCategories, cat]);
+      }
+  };
+
+  const removeCategory = (cat: string) => {
+      setTodoCategories(prev => prev.filter(c => c !== cat));
+      // Also unassign this category from existing items? Optional. 
+      // For now, let's keep the category on items to prevent data loss, 
+      // they just won't be filterable by a module anymore.
+  };
+
   // --- MODULE CONTENT UPDATES ---
 
   const updateContent = (id: string, data: Partial<ModuleItem>) => {
@@ -156,6 +194,25 @@ export const Workspace = () => {
 
   const currentSpecs = MODULE_SPECS[draggingType];
   const hasClock = items.some(i => i.type === 'clock');
+
+  // Helper to determine which todos to show in a specific module
+  const getVisibleTodos = (module: ModuleItem) => {
+      const activeLinkedCategories = items.map(i => i.linkedCategory).filter(Boolean) as string[];
+      
+      if (module.linkedCategory) {
+          // If this module is linked to a category, show ONLY items of that category
+          return globalTodos.filter(t => t.category === module.linkedCategory);
+      } else {
+          // If NOT linked, show items created here...
+          // BUT hide items that belong to a category that is currently linked to ANOTHER module.
+          // This creates the "moved" effect.
+          return globalTodos.filter(t => {
+              const belongsHere = t.originModuleId === module.i;
+              const capturedByOther = t.category && activeLinkedCategories.includes(t.category);
+              return belongsHere && !capturedByOther;
+          });
+      }
+  };
 
   return (
     <div className="app-container" style={{ position: 'relative' }}>
@@ -203,7 +260,7 @@ export const Workspace = () => {
         </div>
       </div>
 
-      {/* MODAL POPUP */}
+      {/* EVENT MODAL POPUP */}
       {showModal && (
         <div className="modal-overlay" onClick={() => setShowModal(false)}>
             <div className="modal-content" onClick={(e) => e.stopPropagation()}>
@@ -211,29 +268,29 @@ export const Workspace = () => {
                 
                 <div className="modal-row">
                     <label>Event Name:</label>
-                    <input type="text" value={modalData.title} onChange={e => setModalData({...modalData, title: e.target.value})} />
+                    <input type="text" value={modalData.title} onChange={e => setModalData({...modalData, title: e.target.value})} placeholder="Meeting with..." />
                 </div>
                 
                 <div className="modal-row" style={{ flexDirection: 'row', gap: '10px' }}>
-                    <div style={{flex:1}}>
+                    <div style={{flex:1, display:'flex', flexDirection:'column', gap:'5px'}}>
                         <label>Date:</label>
                         <input type="date" 
                             value={modalData.date ? modalData.date.split('T')[0] : ''} 
                             onChange={e => setModalData({...modalData, date: new Date(e.target.value).toISOString()})} 
                         />
                     </div>
-                    <div style={{flex:1}}>
+                    <div style={{flex:1, display:'flex', flexDirection:'column', gap:'5px'}}>
                          <label>Color:</label>
-                         <input type="color" value={modalData.color} onChange={e => setModalData({...modalData, color: e.target.value})} style={{width: '100%'}}/>
+                         <input type="color" value={modalData.color} onChange={e => setModalData({...modalData, color: e.target.value})} style={{width: '100%', height:'38px', padding: '2px'}}/>
                     </div>
                 </div>
 
                 <div className="modal-row" style={{ flexDirection: 'row', gap: '10px' }}>
-                    <div style={{flex:1}}>
+                    <div style={{flex:1, display:'flex', flexDirection:'column', gap:'5px'}}>
                         <label>Start:</label>
                         <input type="time" value={modalData.startTime} onChange={e => setModalData({...modalData, startTime: e.target.value})} />
                     </div>
-                    <div style={{flex:1}}>
+                    <div style={{flex:1, display:'flex', flexDirection:'column', gap:'5px'}}>
                         <label>End:</label>
                         <input type="time" value={modalData.endTime} onChange={e => setModalData({...modalData, endTime: e.target.value})} />
                     </div>
@@ -241,17 +298,17 @@ export const Workspace = () => {
 
                 <div className="modal-row">
                     <label>Location:</label>
-                    <input type="text" value={modalData.location} onChange={e => setModalData({...modalData, location: e.target.value})} />
+                    <input type="text" value={modalData.location} onChange={e => setModalData({...modalData, location: e.target.value})} placeholder="Office / Online" />
                 </div>
 
-                <div className="modal-row" style={{flexDirection: 'row', alignItems: 'center', marginTop: '5px'}}>
-                    <input type="checkbox" checked={modalData.notify} onChange={e => setModalData({...modalData, notify: e.target.checked})} />
-                    <label>Notify me</label>
+                <div className="modal-row" style={{flexDirection: 'row', alignItems: 'center', marginTop: '5px', gap: '10px'}}>
+                    <input type="checkbox" checked={modalData.notify} onChange={e => setModalData({...modalData, notify: e.target.checked})} style={{width:'auto'}} />
+                    <label style={{marginBottom:0, cursor:'pointer'}} onClick={() => setModalData({...modalData, notify: !modalData.notify})}>Notify me</label>
                 </div>
 
                 <div className="modal-actions">
-                    <button onClick={() => setShowModal(false)}>Cancel</button>
-                    <button onClick={saveEvent} style={{background: '#007bff', color: 'white', border: 'none', padding: '5px 15px'}}>Save</button>
+                    <button onClick={() => setShowModal(false)} style={{background: '#6c757d', color: 'white', border: 'none', padding: '8px 15px'}}>Cancel</button>
+                    <button onClick={saveEvent} style={{background: '#007bff', color: 'white', border: 'none', padding: '8px 15px'}}>Save</button>
                 </div>
             </div>
         </div>
@@ -335,7 +392,7 @@ export const Workspace = () => {
                                 setEditingTitleId(null);
                             }
                         }}
-                        style={{ height: '18px', fontSize: '11px', border: '1px solid #007bff' }}
+                        style={{ height: '18px', fontSize: '11px', border: '1px solid #007bff', color: '#333', background: 'white' }}
                         onMouseDown={(e) => e.stopPropagation()}
                     />
                 ) : (
@@ -349,7 +406,20 @@ export const Workspace = () => {
                 {item.type === 'notepad' && <Notepad content={item.content || ''} onChange={(txt) => updateContent(item.i, { content: txt })} />}
                 {item.type === 'clock' && <Clock mode={item.clockMode || 'analog'} onToggleMode={() => updateContent(item.i, { clockMode: item.clockMode === 'analog' ? 'digital' : 'analog' })} />}
                 {item.type === 'whiteboard' && <Whiteboard />}
-                {item.type === 'todo' && <TodoList />}
+                {item.type === 'todo' && (
+                    <TodoList 
+                        moduleId={item.i}
+                        items={getVisibleTodos(item)}
+                        allCategories={todoCategories}
+                        linkedCategory={item.linkedCategory}
+                        onAddTodo={(text) => addTodo(text, item.i, item.linkedCategory)}
+                        onUpdateTodo={updateTodo}
+                        onDeleteTodo={deleteTodo}
+                        onAddCategory={addCategory}
+                        onRemoveCategory={removeCategory}
+                        onSetLinkedCategory={(cat) => updateContent(item.i, { linkedCategory: cat, title: cat ? `To-Do: ${cat}` : 'To-Do' })}
+                    />
+                )}
                 {item.type === 'stickynote' && <StickyNote content={item.content || ''} onChange={(txt) => updateContent(item.i, { content: txt })} />}
                 {item.type === 'events' && (
                     <EventsList 
