@@ -175,9 +175,6 @@ export const Workspace = () => {
 
   const removeCategory = (cat: string) => {
       setTodoCategories(prev => prev.filter(c => c !== cat));
-      // Also unassign this category from existing items? Optional. 
-      // For now, let's keep the category on items to prevent data loss, 
-      // they just won't be filterable by a module anymore.
   };
 
   // --- MODULE CONTENT UPDATES ---
@@ -205,7 +202,6 @@ export const Workspace = () => {
       } else {
           // If NOT linked, show items created here...
           // BUT hide items that belong to a category that is currently linked to ANOTHER module.
-          // This creates the "moved" effect.
           return globalTodos.filter(t => {
               const belongsHere = t.originModuleId === module.i;
               const capturedByOther = t.category && activeLinkedCategories.includes(t.category);
