@@ -65,10 +65,10 @@ export const Calendar: React.FC<CalendarProps> = ({ events, onDayClick }) => {
           flexDirection: 'column'
         }}
       >
-        <span>{day}</span>
+        <span style={{ zIndex: 2 }}>{day}</span>
         
         {/* Event Indicators (Dots) */}
-        <div style={{ display: 'flex', gap: '2px', marginTop: '2px' }}>
+        <div style={{ display: 'flex', gap: '2px', marginTop: 'auto', marginBottom: '2px', zIndex: 2 }}>
             {daysEvents.slice(0, 3).map(ev => (
                 <div key={ev.id} style={{ width: '4px', height: '4px', borderRadius: '50%', backgroundColor: ev.color }} />
             ))}
@@ -77,12 +77,11 @@ export const Calendar: React.FC<CalendarProps> = ({ events, onDayClick }) => {
     );
   }
 
-  // Bug 3: Increased padding for safe margins
   return (
-    <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', background: 'white', padding: '10px' }}>
+    <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', background: 'white', padding: '5px' }}>
       
       {/* Navigation Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '5px', padding: '0 5px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '5px', padding: '0 5px', flexShrink: 0 }}>
         <button onClick={prevMonth} style={navBtnStyle}><FaChevronLeft size={10}/></button>
         <span style={{ fontWeight: 'bold', fontSize: '12px', color: '#333' }}>
             {viewDate.toLocaleString('en-US', { month: 'long' })} {year}
@@ -90,18 +89,36 @@ export const Calendar: React.FC<CalendarProps> = ({ events, onDayClick }) => {
         <button onClick={nextMonth} style={navBtnStyle}><FaChevronRight size={10}/></button>
       </div>
 
-      {/* Grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '2px', flex: 1, alignContent: 'start' }}>
+      {/* Days Header */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', textAlign: 'center', marginBottom: '2px', flexShrink: 0 }}>
         {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => (
-            <div key={i} style={{ ...cellStyle, fontWeight: 'bold', borderBottom: '1px solid #eee', color: '#333' }}>{d}</div>
+            <div key={i} style={{ fontSize: '10px', fontWeight: 'bold', color: '#666', paddingBottom: '2px' }}>{d}</div>
         ))}
+      </div>
+
+      {/* Date Grid */}
+      <div style={{ 
+          display: 'grid', 
+          gridTemplateColumns: 'repeat(7, 1fr)', 
+          gridTemplateRows: 'repeat(6, 1fr)', // Force 6 rows to fill space equally
+          gap: '1px', 
+          flex: 1, 
+          minHeight: 0 // Crucial for grid overflow handling
+      }}>
         {gridCells}
       </div>
     </div>
   );
 };
 
+// Updated Cell Style: remove fixed height, add width 100% and centering
 const cellStyle: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', height: '30px', borderRadius: '3px'
+  display: 'flex', 
+  alignItems: 'center', 
+  justifyContent: 'center', // Centers the number vertically if no events, or generally centers content
+  fontSize: '10px', 
+  borderRadius: '3px',
+  width: '100%',
+  height: '100%' // Fill the grid cell
 };
 const navBtnStyle = { background: 'transparent', border: 'none', cursor: 'pointer', color: '#666' };

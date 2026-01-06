@@ -9,8 +9,6 @@ import { TodoList } from './modules/todolist';
 import { EventsList } from './modules/eventslist';
 import type { CalendarEvent, TodoItem } from '../types';
 import { StickyNote } from './modules/stickynote'; 
-
-// Imported missing icons for the Todo Modal
 import { FaRegStickyNote, FaRegClock, FaPencilAlt, FaCalendarAlt, FaCheckSquare, FaBug, FaList, FaTrash, FaPalette, FaTag, FaPlus } from 'react-icons/fa';
 
 const ReactGridLayout = WidthProvider(RGL);
@@ -42,34 +40,48 @@ interface ModuleItem {
   title?: string;
   content?: string;
   clockMode?: 'analog' | 'digital';
-  linkedCategory?: string; // For Todo modules
+  linkedCategory?: string; 
 }
 
+// --- LOCAL STORAGE HELPERS ---
+const loadState = <T,>(key: string, defaultVal: T): T => {
+    try {
+        const saved = localStorage.getItem(key);
+        if (saved) return JSON.parse(saved);
+    } catch (e) {
+        console.error(`Error loading ${key}`, e);
+    }
+    return defaultVal;
+};
+
 export const Workspace = () => {
-  // --- STATE ---
-  const [items, setItems] = useState<ModuleItem[]>([]);
+  // --- STATE (INITIALIZED FROM LOCAL STORAGE) ---
+  
+  const [items, setItems] = useState<ModuleItem[]>(() => loadState('ws_items', []));
+  
+  const [globalEvents, setGlobalEvents] = useState<CalendarEvent[]>(() => loadState('ws_events', []));
+  
+  const [globalTodos, setGlobalTodos] = useState<TodoItem[]>(() => loadState('ws_todos', []));
+  const [todoCategories, setTodoCategories] = useState<string[]>(() => loadState('ws_categories', []));
+
+  // --- PERSISTENCE EFFECTS ---
+  useEffect(() => { localStorage.setItem('ws_items', JSON.stringify(items)); }, [items]);
+  useEffect(() => { localStorage.setItem('ws_events', JSON.stringify(globalEvents)); }, [globalEvents]);
+  useEffect(() => { localStorage.setItem('ws_todos', JSON.stringify(globalTodos)); }, [globalTodos]);
+  useEffect(() => { localStorage.setItem('ws_categories', JSON.stringify(todoCategories)); }, [todoCategories]);
+
+  // UI STATE
   const [draggingType, setDraggingType] = useState<ModuleType>('notepad');
   const [isDropping, setIsDropping] = useState(false);
   const [gridHeight, setGridHeight] = useState(800);
   const [maxRows, setMaxRows] = useState(50);
   const [showDebug, setShowDebug] = useState(false);
   
-  // SHARED EVENT STATE
-  const [globalEvents, setGlobalEvents] = useState<CalendarEvent[]>([]);
-  
-  // SHARED TODO STATE
-  const [globalTodos, setGlobalTodos] = useState<TodoItem[]>([]);
-  const [todoCategories, setTodoCategories] = useState<string[]>([]);
-
-  // EVENT MODAL STATE
+  // MODAL STATES
   const [showModal, setShowModal] = useState(false);
   const [modalData, setModalData] = useState<Partial<CalendarEvent>>({});
-
-  // TODO EDIT MODAL STATE (Moved from TodoList.tsx for Bug 1)
   const [editingTodo, setEditingTodo] = useState<TodoItem | null>(null);
   const [newCatText, setNewCatText] = useState('');
-
-  // RENAMING STATE
   const [editingTitleId, setEditingTitleId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -199,7 +211,6 @@ export const Workspace = () => {
 
   const getVisibleTodos = (module: ModuleItem) => {
       const activeLinkedCategories = items.map(i => i.linkedCategory).filter(Boolean) as string[];
-      
       if (module.linkedCategory) {
           return globalTodos.filter(t => t.category === module.linkedCategory);
       } else {
@@ -311,7 +322,7 @@ export const Workspace = () => {
         </div>
       )}
 
-      {/* TODO EDIT MODAL - MOVED HERE */}
+      {/* TODO EDIT MODAL */}
       {editingTodo && (
         <div className="modal-overlay" onClick={() => setEditingTodo(null)}>
             <div className="modal-content" onClick={(e) => e.stopPropagation()}>
@@ -428,7 +439,24 @@ export const Workspace = () => {
       {/* DEBUG RULERS */}
       {showDebug && (
         <div style={{ position: 'absolute', top: TOOLBAR_HEIGHT, left: 0, width: '100%', height: gridHeight, pointerEvents: 'none', zIndex: 0 }}>
-            {/* ... (Debug rendering kept same as original if needed, but not critical for bug fixes) ... */}
+            <div style={{ display: 'flex', width: '100%', height: '20px', position: 'absolute', top: 0 }}>
+                {Array.from({ length: COLS }).map((_, i) => (
+                    <div key={i} style={{ 
+                        flex: 1, fontSize: '8px', color: 'red', borderLeft: '1px solid rgba(255,0,0,0.2)', paddingLeft: '2px', overflow:'hidden'
+                    }}>
+                        {i}
+                    </div>
+                ))}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '20px', position: 'absolute', left: 0 }}>
+                {Array.from({ length: maxRows }).map((_, i) => (
+                    <div key={i} style={{ 
+                        height: ROW_HEIGHT, fontSize: '8px', color: 'red', borderTop: '1px solid rgba(255,0,0,0.2)', paddingLeft: '2px'
+                    }}>
+                        {i}
+                    </div>
+                ))}
+            </div>
         </div>
       )}
 
@@ -509,9 +537,8 @@ export const Workspace = () => {
                         onAddTodo={(text) => addTodo(text, item.i, item.linkedCategory)}
                         onUpdateTodo={updateTodo}
                         onDeleteTodo={deleteTodo}
-                        // Removed category management props from TodoList as it's now handled globally in Workspace modal
                         onSetLinkedCategory={(cat) => updateContent(item.i, { linkedCategory: cat, title: cat ? `To-Do: ${cat}` : 'To-Do' })}
-                        onEditTodo={(todo) => setEditingTodo(todo)} // Connect to Workspace modal
+                        onEditTodo={(todo) => setEditingTodo(todo)}
                     />
                 )}
                 {item.type === 'stickynote' && <StickyNote content={item.content || ''} onChange={(txt) => updateContent(item.i, { content: txt })} />}
