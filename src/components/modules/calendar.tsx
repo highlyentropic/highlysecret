@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { FaChevronLeft, FaChevronRight } from 'react-icons/fa';
-// FIX: Added 'import type' because CalendarEvent is an interface, not a value
 import type { CalendarEvent } from './eventslist'; 
 
 interface CalendarProps {
@@ -78,8 +77,9 @@ export const Calendar: React.FC<CalendarProps> = ({ events, onDayClick }) => {
     );
   }
 
+  // Bug 3: Increased padding for safe margins
   return (
-    <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', background: 'white', padding: '5px' }}>
+    <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', background: 'white', padding: '10px' }}>
       
       {/* Navigation Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '5px', padding: '0 5px' }}>

@@ -1,4 +1,9 @@
 /* src/App.css */
+/* Global Box Sizing Fix */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
 .app-container {
   height: 100vh;
   width: 100vw;
@@ -18,6 +23,12 @@
 
 .layout {
   user-select: none; 
+}
+
+.module-content {
+  overflow-x: hidden; /* Bug 4: Prevent horizontal scrollbars */
+  display: flex;
+  flex-direction: column;
 }
 
 .module-content textarea {
@@ -124,12 +135,12 @@
 .todo-item-btn {
   display: flex;
   align-items: center;
-  width: 100%;
+  width: 100%; /* With box-sizing: border-box, this is safe now */
   padding: 8px 10px;
   margin-bottom: 6px;
-  background: #f8f9fa; /* Distinctive background */
+  background: #f8f9fa; 
   border: 1px solid #e9ecef;
-  border-radius: 6px; /* Slightly rounded corners */
+  border-radius: 6px; 
   cursor: pointer;
   transition: all 0.2s;
   text-align: left;
@@ -148,6 +159,7 @@
   border-radius: 50%;
   margin-right: 8px;
   border: 1px solid rgba(0,0,0,0.1);
+  flex-shrink: 0; /* Prevent dot from shrinking */
 }
 
 .todo-text {
@@ -212,7 +224,7 @@
     font-size: 14px;
     outline: none;
     width: 100%;
-    box-sizing: border-box;
+    /* box-sizing is handled globally now */
 }
 
 .modal-content input[type="color"] {

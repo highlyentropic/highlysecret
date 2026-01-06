@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { FaTrash, FaCheck, FaPlus, FaTag, FaPalette } from 'react-icons/fa';
+import { FaCheck } from 'react-icons/fa';
 import type { TodoItem } from '../../types';
 
 interface TodoListProps {
@@ -10,22 +10,17 @@ interface TodoListProps {
   onAddTodo: (text: string) => void;
   onUpdateTodo: (id: string, data: Partial<TodoItem>) => void;
   onDeleteTodo: (id: string) => void;
-  onAddCategory: (cat: string) => void;
-  onRemoveCategory: (cat: string) => void;
   onSetLinkedCategory: (cat: string | undefined) => void;
+  onEditTodo: (item: TodoItem) => void; // New prop for external modal
 }
 
 export const TodoList: React.FC<TodoListProps> = ({ 
     items, allCategories, linkedCategory, 
-    onAddTodo, onUpdateTodo, onDeleteTodo, 
-    onAddCategory, onRemoveCategory, onSetLinkedCategory 
+    onAddTodo, onUpdateTodo, onSetLinkedCategory,
+    onEditTodo 
 }) => {
   
   const [newItemText, setNewItemText] = useState('');
-  
-  // Detail Modal State
-  const [editingItem, setEditingItem] = useState<TodoItem | null>(null);
-  const [newCatText, setNewCatText] = useState('');
 
   const commitItem = () => {
     if (newItemText.trim() === '') return;
@@ -57,7 +52,7 @@ export const TodoList: React.FC<TodoListProps> = ({
             <div 
                 key={item.id} 
                 className="todo-item-btn"
-                onClick={() => setEditingItem(item)}
+                onClick={() => onEditTodo(item)} // Open external modal
                 onMouseDown={(e) => e.stopPropagation()}
             >
                 <div 
@@ -113,120 +108,6 @@ export const TodoList: React.FC<TodoListProps> = ({
             />
         </div>
       </div>
-
-      {/* ITEM DETAIL MODAL */}
-      {editingItem && (
-        <div className="modal-overlay" onClick={() => setEditingItem(null)}>
-            <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-                <div className="modal-header" style={{display:'flex', justifyContent:'space-between'}}>
-                    <span>Edit Item</span>
-                    <button onClick={() => { onDeleteTodo(editingItem.id); setEditingItem(null); }} style={{background:'transparent', border:'none', color:'#dc3545', cursor:'pointer'}}>
-                        <FaTrash />
-                    </button>
-                </div>
-
-                <div className="modal-row">
-                    <label>Task:</label>
-                    <input 
-                        type="text" 
-                        value={editingItem.text} 
-                        onChange={(e) => {
-                            const val = e.target.value;
-                            setEditingItem({...editingItem, text: val});
-                            onUpdateTodo(editingItem.id, { text: val });
-                        }} 
-                    />
-                </div>
-
-                <div className="modal-row">
-                    <label>Description:</label>
-                    <textarea 
-                        rows={3}
-                        value={editingItem.description || ''} 
-                        onChange={(e) => {
-                            const val = e.target.value;
-                            setEditingItem({...editingItem, description: val});
-                            onUpdateTodo(editingItem.id, { description: val });
-                        }}
-                        placeholder="Add details..."
-                    />
-                </div>
-
-                <div className="modal-row" style={{ flexDirection: 'row', gap: '10px' }}>
-                    <div style={{flex: 1}}>
-                        <label><FaPalette /> Color:</label>
-                        <input 
-                            type="color" 
-                            value={editingItem.color || '#333333'} 
-                            onChange={(e) => {
-                                const val = e.target.value;
-                                setEditingItem({...editingItem, color: val});
-                                onUpdateTodo(editingItem.id, { color: val });
-                            }} 
-                        />
-                    </div>
-                    <div style={{flex: 1}}>
-                        <label><FaTag /> Category:</label>
-                        <select 
-                            value={editingItem.category || ''} 
-                            onChange={(e) => {
-                                const val = e.target.value || undefined;
-                                setEditingItem({...editingItem, category: val});
-                                onUpdateTodo(editingItem.id, { category: val });
-                            }}
-                        >
-                            <option value="">(None)</option>
-                            {allCategories.map(cat => (
-                                <option key={cat} value={cat}>{cat}</option>
-                            ))}
-                        </select>
-                    </div>
-                </div>
-
-                {/* Category Management */}
-                <div className="modal-row" style={{borderTop: '1px solid #eee', paddingTop: '10px', marginTop: '5px'}}>
-                    <label style={{fontSize:'11px'}}>Manage Categories:</label>
-                    <div style={{display:'flex', gap:'5px'}}>
-                        <input 
-                            type="text" 
-                            placeholder="New category..." 
-                            value={newCatText}
-                            onChange={(e) => setNewCatText(e.target.value)}
-                            style={{flex:1}}
-                        />
-                        <button 
-                            onClick={() => {
-                                if(newCatText) {
-                                    onAddCategory(newCatText);
-                                    setNewCatText('');
-                                }
-                            }}
-                            style={{background:'#28a745', color:'white', border:'none', borderRadius:'4px', padding:'0 10px'}}
-                        >
-                            <FaPlus />
-                        </button>
-                    </div>
-                    <div style={{display:'flex', flexWrap:'wrap', gap:'5px', marginTop:'5px'}}>
-                        {allCategories.map(cat => (
-                            <span key={cat} className="category-tag" style={{background:'#eee', padding:'2px 5px', display:'flex', alignItems:'center', gap:'5px'}}>
-                                {cat}
-                                <button 
-                                    onClick={() => onRemoveCategory(cat)}
-                                    style={{border:'none', background:'transparent', color:'#999', cursor:'pointer', padding:0, fontSize:'10px'}}
-                                >
-                                    ✕
-                                </button>
-                            </span>
-                        ))}
-                    </div>
-                </div>
-
-                <div className="modal-actions">
-                    <button onClick={() => setEditingItem(null)} style={{background: '#007bff', color: 'white', border: 'none', padding: '8px 15px', borderRadius: '4px'}}>Done</button>
-                </div>
-            </div>
-        </div>
-      )}
     </div>
   );
 };
