@@ -1,16 +1,6 @@
 import React from 'react';
-import { FaBell, FaBellSlash, FaPlus } from 'react-icons/fa';
-
-export interface CalendarEvent {
-  id: string;
-  title: string;
-  date: string; // ISO String
-  startTime?: string;
-  endTime?: string;
-  location?: string;
-  notify: boolean;
-  color: string;
-}
+import { FaBell, FaPlus } from 'react-icons/fa';
+import type { CalendarEvent } from '../../types';
 
 interface EventsListProps {
   events: CalendarEvent[];
@@ -19,8 +9,15 @@ interface EventsListProps {
 }
 
 export const EventsList: React.FC<EventsListProps> = ({ events, onAddClick, onToggleNotify }) => {
-  // Sort events by date
-  const sortedEvents = [...events].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  // Sort events by date, then by time
+  const sortedEvents = [...events].sort((a, b) => {
+      const dateA = new Date(a.date).getTime();
+      const dateB = new Date(b.date).getTime();
+      if (dateA !== dateB) return dateA - dateB;
+      if (a.isAllDay) return -1;
+      if (b.isAllDay) return 1;
+      return (a.startTime || '').localeCompare(b.startTime || '');
+  });
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'white', padding: '15px' }}>
@@ -47,22 +44,30 @@ export const EventsList: React.FC<EventsListProps> = ({ events, onAddClick, onTo
             const dateObj = new Date(evt.date);
             const month = dateObj.toLocaleString('default', { month: 'short' });
             const day = dateObj.getDate();
+            const isHoliday = evt.category === 'Public Holiday';
 
             return (
                 <div key={evt.id} className="event-row">
                     <div className="event-date-box">
-                        <span className="event-month">{month}</span>
-                        <span className="event-day">{day}</span>
+                        <span className="event-month" style={{color: isHoliday ? '#d9534f' : '#666'}}>{month}</span>
+                        <span className="event-day" style={{color: isHoliday ? '#d9534f' : '#333'}}>{day}</span>
                     </div>
                     <div className="event-details">
                         <div className="event-time">
-                            {evt.startTime ? `${evt.startTime} - ${evt.endTime || '...'}` : 'All Day'}
-                            <button 
-                                onClick={() => onToggleNotify(evt.id)}
-                                style={{ border: 'none', background: 'transparent', cursor: 'pointer', marginLeft: 'auto', color: evt.notify ? '#007bff' : '#ccc' }}
-                            >
-                                <FaBell size={10} />
-                            </button>
+                            {evt.isAllDay ? (
+                                <span style={{fontWeight:'bold', color: '#555', fontSize:'10px', textTransform:'uppercase'}}>All Day</span>
+                            ) : (
+                                <span>{evt.startTime} {evt.endTime ? `- ${evt.endTime}` : ''}</span>
+                            )}
+                            
+                            {!isHoliday && (
+                                <button 
+                                    onClick={() => onToggleNotify(evt.id)}
+                                    style={{ border: 'none', background: 'transparent', cursor: 'pointer', marginLeft: 'auto', color: evt.notify ? '#007bff' : '#ccc' }}
+                                >
+                                    <FaBell size={10} />
+                                </button>
+                            )}
                         </div>
                         <div className="event-title" style={{ borderLeft: `3px solid ${evt.color}`, paddingLeft: '5px' }}>
                             {evt.title}

@@ -1,10 +1,30 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { FaEraser } from 'react-icons/fa';
 
-export const Whiteboard: React.FC = () => {
+interface WhiteboardProps {
+    content?: string; // Base64 data URL
+    onChange: (dataUrl: string) => void;
+}
+
+export const Whiteboard: React.FC<WhiteboardProps> = ({ content, onChange }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
+  const isLoaded = useRef(false);
+
+  // Load initial content
+  useEffect(() => {
+      const canvas = canvasRef.current;
+      const ctx = canvas?.getContext('2d');
+      if (canvas && ctx && content && !isLoaded.current) {
+          const img = new Image();
+          img.src = content;
+          img.onload = () => {
+              ctx.drawImage(img, 0, 0);
+              isLoaded.current = true;
+          };
+      }
+  }, []); // Run once on mount (or when content becomes available initially)
 
   // Handle Resize: Expand canvas without scaling/stretching image
   useEffect(() => {
@@ -17,23 +37,22 @@ export const Whiteboard: React.FC = () => {
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
       
-      // If canvas has 0 width (initial load), just resize
-      if (canvas.width === 0 || canvas.height === 0) {
-        canvas.width = container.clientWidth;
-        canvas.height = container.clientHeight;
-        return;
-      }
-
-      const existingImage = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const savedData = canvas.toDataURL(); // Save before resize
 
       // 2. Resize buffer to match new container size
-      canvas.width = container.clientWidth;
-      canvas.height = container.clientHeight;
+      if (container.clientWidth > 0 && container.clientHeight > 0) {
+        canvas.width = container.clientWidth;
+        canvas.height = container.clientHeight;
+      }
 
-      // 3. Put drawing back (at 0,0) - this achieves "Expand without scaling"
-      ctx.putImageData(existingImage, 0, 0);
+      // 3. Put drawing back
+      const img = new Image();
+      img.src = savedData;
+      img.onload = () => {
+          ctx.drawImage(img, 0, 0);
+      };
       
-      // Reset line styles after resize (context reset)
+      // Reset line styles after resize
       ctx.lineWidth = 2;
       ctx.lineCap = 'round';
       ctx.strokeStyle = '#000';
@@ -42,7 +61,6 @@ export const Whiteboard: React.FC = () => {
     // Initial size
     resizeCanvas();
 
-    // Observe size changes
     const observer = new ResizeObserver(() => resizeCanvas());
     observer.observe(container);
 
@@ -74,7 +92,14 @@ export const Whiteboard: React.FC = () => {
   };
 
   const stopDrawing = () => {
-    setIsDrawing(false);
+    if (isDrawing) {
+        setIsDrawing(false);
+        // Save state
+        const canvas = canvasRef.current;
+        if (canvas) {
+            onChange(canvas.toDataURL());
+        }
+    }
   };
 
   const clearCanvas = () => {
@@ -83,6 +108,7 @@ export const Whiteboard: React.FC = () => {
     const ctx = canvas.getContext('2d');
     if (ctx) {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
+        onChange(''); // Clear from storage
     }
   };
 
@@ -99,7 +125,7 @@ export const Whiteboard: React.FC = () => {
       {/* Eraser Button */}
       <button 
         onClick={clearCanvas}
-        onMouseDown={(e) => e.stopPropagation()} // Prevent drag start
+        onMouseDown={(e) => e.stopPropagation()} 
         title="Clear Whiteboard"
         style={{
             position: 'absolute', top: 5, right: 5,

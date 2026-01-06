@@ -12,6 +12,8 @@
     "start": "concurrently -k \"npm run dev\" \"npm run electron\""
   },
   "dependencies": {
+    "date-fns": "^4.1.0",
+    "date-holidays": "^3.26.6",
     "lodash": "^4.17.21",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
