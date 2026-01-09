@@ -1,14 +1,14 @@
 export interface CalendarEvent {
   id: string;
   title: string;
-  date: string; // ISO String for the day
-  startTime?: string; // HH:mm
-  endTime?: string;   // HH:mm
+  date: string; // ISO String
+  startTime?: string;
+  endTime?: string;
   location?: string;
   notify: boolean;
   color: string;
-  isAllDay?: boolean; // NEW: Supports full-day events
-  category?: string;  // NEW: To identify 'Public Holiday'
+  isAllDay?: boolean;
+  category?: string;
 }
 
 export interface TodoItem {
@@ -17,6 +17,7 @@ export interface TodoItem {
   done: boolean;
   description?: string;
   color?: string; 
-  category?: string;
+  category?: string; 
   originModuleId: string; 
+  linkedEventId?: string; // NEW: Link to a calendar event
 }

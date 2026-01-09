@@ -1,7 +1,13 @@
 /* src/App.css */
-/* Global Box Sizing Fix */
+/* Global Box Sizing & Visibility Fixes */
 *, *::before, *::after {
   box-sizing: border-box;
+}
+
+body {
+  color: #333; /* Force dark text */
+  margin: 0;
+  padding: 0;
 }
 
 .app-container {
@@ -15,51 +21,72 @@
   background-size: 20px 20px;
 }
 
-/* FIX FOR FREEZE: */
-.react-grid-item.react-grid-placeholder {
-  opacity: 0.5 !important;
-  background: rgba(0, 123, 255, 0.2) !important;
+/* Force Input Visibility (Dark Mode Override) */
+input, textarea, select {
+    background-color: #ffffff !important;
+    color: #333333 !important;
+    border: 1px solid #ccc;
 }
 
-.layout {
-  user-select: none; 
-}
-
+/* Module Content */
 .module-content {
-  overflow-x: hidden; /* Bug 4: Prevent horizontal scrollbars */
+  overflow-x: hidden;
   display: flex;
   flex-direction: column;
-}
-
-.module-content textarea {
-  user-select: text;
-  cursor: auto;
-}
-
-/* --- TOOLBAR --- */
-.toolbar {
-  padding: 10px;
   background: white;
-  border-bottom: 1px solid #ccc;
+  color: #333; /* Ensure text inside modules is dark */
+}
+
+/* --- CALENDAR --- */
+.calendar-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 8px; /* Compact padding */
+    border-bottom: 1px solid #eee;
+    background: #fafafa;
+    flex-shrink: 0;
+}
+
+/* --- TODO LIST --- */
+.todo-item-btn {
   display: flex;
-  gap: 10px;
-  z-index: 10;
-  box-shadow: 0 2px 5px rgba(0,0,0,0.05);
-  color: #333; 
+  align-items: center;
+  width: 100%;
+  padding: 6px 8px;
+  margin-bottom: 4px;
+  background: #f8f9fa; 
+  border: 1px solid #e9ecef;
+  border-radius: 4px;
+  cursor: pointer;
+  color: #333;
 }
+.todo-item-btn:hover { background: #e2e6ea; }
 
-.droppable-element {
-    transition: transform 0.1s;
+.todo-text {
+  flex: 1;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-left: 5px;
 }
-.droppable-element:active {
-    transform: scale(0.95);
-}
+.todo-text.done { text-decoration: line-through; color: #999; }
 
-.droppable-element span {
-    color: #555;
-    font-weight: 500;
+/* --- NOTEPAD PREVIEW --- */
+.notepad-preview {
+    padding: 10px;
+    overflow-y: auto;
+    height: 100%;
+    font-size: 14px;
+    line-height: 1.5;
 }
+.notepad-preview h1, .notepad-preview h2, .notepad-preview h3 { margin-top: 0.5em; margin-bottom: 0.2em; }
+.notepad-preview p { margin-bottom: 0.5em; }
+.notepad-preview ul, .notepad-preview ol { padding-left: 20px; }
 
+/* --- GENERIC GRID & MODAL STYLES (Keep existing) --- */
+.layout { user-select: none; }
 .grid-item {
   background: white;
   border: 1px solid #ddd;
@@ -69,7 +96,6 @@
   flex-direction: column;
   overflow: hidden;
 }
-
 .drag-handle {
   background: #f8f9fa;
   padding: 5px 8px;
@@ -78,208 +104,26 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
+  min-height: 28px;
 }
-.drag-handle:active { cursor: grabbing; }
+.module-title { font-weight: bold; font-size: 11px; color: #555; text-transform: uppercase; }
+.close-btn { background: transparent; border: none; color: #999; cursor: pointer; }
 
-.module-title { font-weight: bold; font-size: 11px; color: #555; text-transform: uppercase; letter-spacing: 0.5px;}
-
-.close-btn {
-  background: transparent;
-  border: none;
-  color: #999;
-  cursor: pointer;
-  font-size: 14px;
-}
-.close-btn:hover { color: red; }
-
-/* --- STICKY NOTE STYLES --- */
-.sticky-note-container {
-  background-color: #fff740;
-  width: 100%;
-  height: 100%;
-  position: relative;
-  clip-path: polygon(
-    0% 0%, 
-    100% 0%, 
-    100% calc(100% - 20px), 
-    calc(100% - 20px) 100%, 
-    0% 100%
-  );
-  box-shadow: -2px 2px 5px rgba(0,0,0,0.1);
-}
-
-.sticky-note-fold {
-  position: absolute;
-  bottom: 0;
-  right: 0;
-  width: 20px;
-  height: 20px;
-  background-color: #e0d730;
-  box-shadow: -1px -1px 2px rgba(0,0,0,0.2);
-}
-
-.sticky-input {
-  width: 100%;
-  height: 100%;
-  background: transparent;
-  border: none;
-  resize: none;
-  padding: 10px;
-  font-family: 'Comic Sans MS', 'Cursive', sans-serif;
-  font-size: 14px;
-  color: #333;
-  outline: none;
-}
-
-/* --- TODO LIST STYLES --- */
-.todo-item-btn {
-  display: flex;
-  align-items: center;
-  width: 100%; /* With box-sizing: border-box, this is safe now */
-  padding: 8px 10px;
-  margin-bottom: 6px;
-  background: #f8f9fa; 
-  border: 1px solid #e9ecef;
-  border-radius: 6px; 
-  cursor: pointer;
-  transition: all 0.2s;
-  text-align: left;
-  color: #333;
-}
-
-.todo-item-btn:hover {
-  background: #e2e6ea;
-  transform: translateY(-1px);
-  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-}
-
-.todo-color-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  margin-right: 8px;
-  border: 1px solid rgba(0,0,0,0.1);
-  flex-shrink: 0; /* Prevent dot from shrinking */
-}
-
-.todo-text {
-  flex: 1;
-  font-size: 13px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.todo-text.done {
-  text-decoration: line-through;
-  color: #999;
-}
-
-/* --- MODAL STYLES --- */
+/* Modal */
 .modal-overlay {
-  position: fixed;
-  top: 0; 
-  left: 0;
-  width: 100vw; 
-  height: 100vh;
-  background: rgba(0,0,0,0.5);
-  display: flex; 
-  align-items: center; 
-  justify-content: center;
-  z-index: 9999;
+  position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+  background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 9999;
 }
-
 .modal-content {
-  background: white;
-  padding: 20px;
-  border-radius: 8px;
-  width: 350px;
-  box-shadow: 0 4px 15px rgba(0,0,0,0.2);
-  display: flex; 
-  flex-direction: column; 
-  gap: 12px;
+  background: white; padding: 20px; border-radius: 8px; width: 350px;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.2); display: flex; flex-direction: column; gap: 10px;
   color: #333;
 }
-
-.modal-header { font-weight: bold; margin-bottom: 5px; font-size: 18px; border-bottom: 1px solid #eee; padding-bottom: 10px;}
-
-.modal-row { 
-    display: flex; 
-    flex-direction: column; 
-    gap: 5px; 
-    font-size: 13px; 
-}
-
-/* General Input Styling in Modals */
-.modal-content input[type="text"],
-.modal-content input[type="date"],
-.modal-content input[type="time"],
-.modal-content textarea,
-.modal-content select {
-    padding: 8px;
-    border: 1px solid #ccc;
-    border-radius: 4px;
-    background-color: #fff;
-    color: #333;
-    font-size: 14px;
-    outline: none;
-    width: 100%;
-    /* box-sizing is handled globally now */
-}
-
-.modal-content input[type="color"] {
-    width: 100%;
-    height: 40px;
-    padding: 2px;
-    border: 1px solid #ccc;
-    border-radius: 4px;
-    background: white;
-}
-
-.modal-content input:focus,
-.modal-content select:focus,
-.modal-content textarea:focus {
-    border-color: #007bff;
-    box-shadow: 0 0 0 2px rgba(0,123,255,0.2);
-}
-
-.modal-content label {
-    font-weight: 500;
-    color: #555;
-}
-
+.modal-row { display: flex; flex-direction: column; gap: 5px; font-size: 13px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 10px; }
 
-/* Category Tags */
-.category-tag {
-    display: inline-block;
-    padding: 2px 6px;
-    background: #e9ecef;
-    border-radius: 4px;
-    font-size: 10px;
-    color: #555;
-    margin-right: 5px;
+/* Toolbar */
+.toolbar {
+  padding: 10px; background: white; border-bottom: 1px solid #ccc;
+  display: flex; gap: 10px; z-index: 10; color: #333;
 }
-
-/* --- EVENTS LIST STYLES --- */
-.event-row {
-  display: flex;
-  gap: 15px;
-  padding: 10px 0;
-  border-bottom: 1px solid #f0f0f0;
-  align-items: flex-start;
-}
-.event-date-box {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  min-width: 40px;
-  line-height: 1;
-}
-.event-month { font-size: 10px; text-transform: uppercase; color: #666; font-weight: bold; }
-.event-day { font-size: 24px; color: #333; font-weight: 300; }
-
-.event-details { display: flex; flex-direction: column; flex: 1; }
-.event-time { font-size: 11px; color: #666; margin-bottom: 2px; display: flex; align-items: center; gap: 5px; }
-.event-title { font-weight: bold; font-size: 14px; color: #000; }
-.event-loc { font-size: 11px; color: #888; margin-top: 2px; }

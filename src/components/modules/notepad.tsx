@@ -1,96 +1,72 @@
 import React, { useState, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { FaBold, FaItalic, FaListUl, FaEye, FaPen } from 'react-icons/fa';
 
 interface NotepadProps {
-  content: string;
-  onChange: (newContent: string) => void;
+    content: string;
+    onChange: (text: string) => void;
 }
 
 export const Notepad: React.FC<NotepadProps> = ({ content, onChange }) => {
-  const [isPreview, setIsPreview] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
 
-  const insertText = (before: string, after: string = '') => {
-    const textarea = textAreaRef.current;
-    if (!textarea) return;
-    const start = textarea.selectionStart;
-    const end = textarea.selectionEnd;
-    const previousText = textarea.value;
-    const newText = previousText.substring(0, start) + before + previousText.substring(start, end) + after + previousText.substring(end);
-    onChange(newText);
-    setTimeout(() => {
-        textarea.focus();
-        textarea.setSelectionRange(start + before.length, end + before.length);
-    }, 10);
+  // Shortcut Handler
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+      if (!textAreaRef.current) return;
+      const { selectionStart, selectionEnd, value } = textAreaRef.current;
+      
+      const wrapText = (wrapper: string) => {
+          e.preventDefault();
+          const before = value.substring(0, selectionStart);
+          const selected = value.substring(selectionStart, selectionEnd);
+          const after = value.substring(selectionEnd);
+          const newText = `${before}${wrapper}${selected}${wrapper}${after}`;
+          onChange(newText);
+          // Restore cursor/selection? Ideally yes, but tricky in React controlled inputs without layout effect
+          // Simple refocus logic:
+          setTimeout(() => {
+              if (textAreaRef.current) {
+                  textAreaRef.current.focus();
+                  textAreaRef.current.setSelectionRange(selectionStart + wrapper.length, selectionEnd + wrapper.length);
+              }
+          }, 0);
+      };
+
+      if ((e.ctrlKey || e.metaKey) && e.key === 'b') wrapText('**');
+      if ((e.ctrlKey || e.metaKey) && e.key === 'i') wrapText('*');
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); setIsEditing(false); } // Save/Exit
   };
 
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      {/* Toolbar */}
-      <div style={{ 
-          padding: '5px', borderBottom: '1px solid #ccc', background: '#f0f0f0', 
-          display: 'flex', gap: '5px', justifyContent: 'space-between', color: '#000' 
-      }}>
-        <div style={{ display: 'flex', gap: '5px' }}>
-            {!isPreview && (
-                <>
-                    <button title="Bold" onClick={() => insertText('**', '**')} style={btnStyle}><FaBold size={10} color="#333"/></button>
-                    <button title="Italic" onClick={() => insertText('*', '*')} style={btnStyle}><FaItalic size={10} color="#333"/></button>
-                    <button title="List" onClick={() => insertText('- ')} style={btnStyle}><FaListUl size={10} color="#333"/></button>
-                </>
-            )}
-        </div>
-        <button 
-            onClick={() => setIsPreview(!isPreview)} 
-            style={{...btnStyle, width: 'auto', padding: '2px 8px', color: '#333'}}
-            onMouseDown={(e) => e.stopPropagation()} 
-        >
-            {isPreview ? <><FaPen size={10}/> Edit</> : <><FaEye size={10}/> Preview</>}
-        </button>
-      </div>
+  if (isEditing) {
+      return (
+          <textarea
+            ref={textAreaRef}
+            value={content}
+            onChange={(e) => onChange(e.target.value)}
+            onBlur={() => setIsEditing(false)}
+            onKeyDown={handleKeyDown}
+            autoFocus
+            style={{
+                width: '100%', height: '100%', border: 'none', resize: 'none', outline: 'none',
+                padding: '10px', fontSize: '14px', fontFamily: 'monospace', color: '#333', background: 'white'
+            }}
+            placeholder="Type here... (Ctrl+B bold, Ctrl+I italic)"
+          />
+      );
+  }
 
-      {/* Content Area */}
-      <div style={{ flex: 1, overflow: 'hidden', position: 'relative', background: 'white' }}>
-        {isPreview ? (
-            <div className="markdown-body" style={{ padding: '10px', height: '100%', overflowY: 'auto', fontSize: '14px', lineHeight: '1.5', color: '#000' }}>
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {content || '*No content*'}
-                </ReactMarkdown>
-            </div>
+  return (
+    <div 
+        className="notepad-preview"
+        onClick={() => setIsEditing(true)}
+        style={{ cursor: 'text', height: '100%', background: 'white', color: '#333' }}
+    >
+        {content ? (
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
         ) : (
-            <textarea
-                ref={textAreaRef}
-                className="notepad-input"
-                placeholder="Type Markdown here..."
-                value={content}
-                onChange={(e) => onChange(e.target.value)}
-                onMouseDown={(e) => e.stopPropagation()} 
-                style={{
-                    width: '100%', 
-                    height: '100%', 
-                    padding: '10px',
-                    resize: 'none', 
-                    border: 'none', 
-                    outline: 'none', 
-                    fontFamily: 'monospace', 
-                    fontSize: '13px', 
-                    color: '#333', 
-                    background: 'white',
-                    overflowX: 'hidden', 
-                    overflowY: 'auto',
-                    whiteSpace: 'pre-wrap', 
-                    wordWrap: 'break-word' 
-                }}
-            />
+            <span style={{color: '#999', fontStyle: 'italic'}}>Click to edit...</span>
         )}
-      </div>
     </div>
   );
-};
-
-const btnStyle = {
-    border: '1px solid #999', background: '#fff', borderRadius: '3px', 
-    cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', minWidth: '24px'
 };
