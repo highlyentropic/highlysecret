@@ -10,7 +10,7 @@ import { TodoList } from './modules/todolist';
 import { EventsList } from './modules/eventslist';
 import type { CalendarEvent, TodoItem } from '../types';
 import { StickyNote } from './modules/stickynote'; 
-import { FaRegStickyNote, FaRegClock, FaPencilAlt, FaCalendarAlt, FaCheckSquare, FaBug, FaList, FaTrash, FaPalette, FaTag, FaPlus, FaExclamationTriangle } from 'react-icons/fa';
+import { FaRegStickyNote, FaRegClock, FaPencilAlt, FaCalendarAlt, FaCheckSquare, FaBug, FaList, FaTrash, FaPalette, FaTag, FaPlus, FaExclamationTriangle, FaLink } from 'react-icons/fa';
 
 const ReactGridLayout = WidthProvider(RGL);
 
@@ -39,7 +39,7 @@ interface ModuleItem {
   h: number;
   type: ModuleType;
   title?: string;
-  listTitle?: string; // NEW for Todo
+  listTitle?: string;
   content?: string; 
   clockMode?: 'analog' | 'digital';
   linkedCategory?: string; 
@@ -79,6 +79,11 @@ export const Workspace = () => {
   }, []);
 
   const allEvents = [...holidayEvents, ...globalEvents];
+  
+  // Future events for linking
+  const upcomingEvents = allEvents.filter(e => new Date(e.date) >= new Date(new Date().setHours(0,0,0,0)))
+                                  .sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+                                  .slice(0, 15);
 
   // --- AUTO-CHECK TODOs LINKED TO PAST EVENTS ---
   useEffect(() => {
@@ -103,7 +108,7 @@ export const Workspace = () => {
               return todo;
           });
           if (hasUpdates) setGlobalTodos(updatedTodos);
-      }, 60000); // Check every minute
+      }, 60000); 
       return () => clearInterval(interval);
   }, [globalTodos, allEvents]);
 
@@ -118,6 +123,7 @@ export const Workspace = () => {
   const [showModal, setShowModal] = useState(false);
   const [modalData, setModalData] = useState<Partial<CalendarEvent>>({});
   const [editingTodo, setEditingTodo] = useState<TodoItem | null>(null);
+  const [newCatText, setNewCatText] = useState('');
   const [editingTitleId, setEditingTitleId] = useState<string | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
@@ -181,6 +187,12 @@ export const Workspace = () => {
   const addTodo = (text: string, moduleId: string) => setGlobalTodos([...globalTodos, { id: Date.now().toString(), text, done: false, originModuleId: moduleId, color: '#333333' }]);
   const updateTodo = (id: string, updates: Partial<TodoItem>) => setGlobalTodos(prev => prev.map(t => t.id === id ? { ...t, ...updates } : t));
   const deleteTodo = (id: string) => setGlobalTodos(prev => prev.filter(t => t.id !== id));
+  const addCategory = (cat: string) => { if (cat && !todoCategories.includes(cat)) setTodoCategories([...todoCategories, cat]); };
+  const removeCategory = (cat: string) => setTodoCategories(prev => prev.filter(c => c !== cat));
+  
+  const moveTodo = (itemId: string, targetModuleId: string) => {
+      setGlobalTodos(prev => prev.map(t => t.id === itemId ? { ...t, originModuleId: targetModuleId } : t));
+  };
   
   const getVisibleTodos = (module: ModuleItem) => globalTodos.filter(t => t.originModuleId === module.i);
   const currentSpecs = MODULE_SPECS[draggingType];
@@ -205,6 +217,11 @@ export const Workspace = () => {
                 <span style={{fontSize: '9px', marginTop: '4px'}}>{tool.label}</span>
             </div>
         ))}
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '5px' }}>
+            <button onClick={() => setShowDebug(!showDebug)} style={{ border: '1px solid #ccc', background: showDebug ? '#ffeeba' : 'white', padding: '5px 10px', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                <FaBug /> {showDebug ? 'Debug ON' : 'Debug OFF'}
+            </button>
+        </div>
       </div>
 
       {/* CONFIRM DELETE MODAL */}
@@ -226,6 +243,7 @@ export const Workspace = () => {
       {showModal && (
         <div className="modal-overlay" onClick={() => setShowModal(false)}>
             <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+                {/* ... (Existing Event Modal Content) ... */}
                 <div className="modal-header">Add Event</div>
                 <div className="modal-row"><label>Title:</label><input type="text" value={modalData.title} onChange={e => setModalData({...modalData, title: e.target.value})} /></div>
                 <div className="modal-row" style={{ flexDirection: 'row', gap: '10px' }}><div style={{flex:1}}><label>Date:</label><input type="date" value={modalData.date ? modalData.date.split('T')[0] : ''} onChange={e => setModalData({...modalData, date: new Date(e.target.value).toISOString()})} /></div><div style={{flex:1}}><label>Color:</label><input type="color" value={modalData.color} onChange={e => setModalData({...modalData, color: e.target.value})} style={{width:'100%', height:'38px'}} /></div></div>
@@ -242,8 +260,36 @@ export const Workspace = () => {
             <div className="modal-content" onClick={(e) => e.stopPropagation()}>
                 <div className="modal-header" style={{display:'flex', justifyContent:'space-between'}}><span>Edit Item</span><button onClick={() => { deleteTodo(editingTodo.id); setEditingTodo(null); }} style={{background:'transparent', border:'none', color:'#dc3545'}}><FaTrash /></button></div>
                 <div className="modal-row"><label>Task:</label><input type="text" value={editingTodo.text} onChange={(e) => { const val = e.target.value; setEditingTodo({...editingTodo, text: val}); updateTodo(editingTodo.id, { text: val }); }} /></div>
-                <div className="modal-row"><label>Description:</label><textarea rows={3} value={editingTodo.description || ''} onChange={(e) => { const val = e.target.value; setEditingTodo({...editingTodo, description: val}); updateTodo(editingTodo.id, { description: val }); }} /></div>
-                <div className="modal-row" style={{ flexDirection: 'row', gap: '10px' }}><div style={{flex: 1}}><label><FaPalette /> Color:</label><input type="color" value={editingTodo.color || '#333333'} onChange={(e) => { const val = e.target.value; setEditingTodo({...editingTodo, color: val}); updateTodo(editingTodo.id, { color: val }); }} /></div></div>
+                
+                {/* Markdown Enabled Description */}
+                <div className="modal-row"><label>Description (Markdown):</label><textarea rows={5} value={editingTodo.description || ''} onChange={(e) => { const val = e.target.value; setEditingTodo({...editingTodo, description: val}); updateTodo(editingTodo.id, { description: val }); }} placeholder="Type... (Supports Markdown)" /></div>
+                
+                <div className="modal-row" style={{ flexDirection: 'row', gap: '10px' }}>
+                    <div style={{flex: 1}}><label><FaPalette /> Color:</label><input type="color" value={editingTodo.color || '#333333'} onChange={(e) => { const val = e.target.value; setEditingTodo({...editingTodo, color: val}); updateTodo(editingTodo.id, { color: val }); }} /></div>
+                    <div style={{flex: 1}}><label><FaTag /> Category:</label><select value={editingTodo.category || ''} onChange={(e) => { const val = e.target.value || undefined; setEditingTodo({...editingTodo, category: val}); updateTodo(editingTodo.id, { category: val }); }}><option value="">(None)</option>{todoCategories.map(cat => (<option key={cat} value={cat}>{cat}</option>))}</select></div>
+                </div>
+
+                {/* NEW: Link to Event Selector */}
+                <div className="modal-row" style={{borderTop: '1px solid #eee', paddingTop: '10px'}}>
+                    <label><FaLink /> Link to Event:</label>
+                    <select 
+                        value={editingTodo.linkedEventId || ''} 
+                        onChange={(e) => {
+                            const val = e.target.value || undefined;
+                            setEditingTodo({...editingTodo, linkedEventId: val});
+                            updateTodo(editingTodo.id, { linkedEventId: val });
+                        }}
+                    >
+                        <option value="">(No Link)</option>
+                        {upcomingEvents.map(e => (
+                            <option key={e.id} value={e.id}>
+                                {new Date(e.date).toLocaleDateString()} - {e.title}
+                            </option>
+                        ))}
+                    </select>
+                </div>
+
+                <div className="modal-row" style={{borderTop: '1px solid #eee', paddingTop: '10px', marginTop: '5px'}}><label style={{fontSize:'11px'}}>Manage Categories:</label><div style={{display:'flex', gap:'5px'}}><input type="text" placeholder="New category..." value={newCatText} onChange={(e) => setNewCatText(e.target.value)} style={{flex:1}} /><button onClick={() => { if(newCatText) { addCategory(newCatText); setNewCatText(''); } }} style={{background:'#28a745', color:'white', border:'none', borderRadius:'4px', padding:'0 10px'}}><FaPlus /></button></div><div style={{display:'flex', flexWrap:'wrap', gap:'5px', marginTop:'5px'}}>{todoCategories.map(cat => (<span key={cat} className="category-tag" style={{background:'#eee', padding:'2px 5px', display:'flex', alignItems:'center', gap:'5px'}}>{cat}<button onClick={() => removeCategory(cat)} style={{border:'none', background:'transparent', color:'#999', cursor:'pointer', padding:0, fontSize:'10px'}}>✕</button></span>))}</div></div>
                 <div className="modal-actions"><button onClick={() => setEditingTodo(null)} style={{background: '#007bff', color: 'white', border: 'none', padding: '8px 15px', borderRadius: '4px'}}>Done</button></div>
             </div>
         </div>
@@ -269,11 +315,13 @@ export const Workspace = () => {
                         moduleId={item.i} 
                         listTitle={item.listTitle || ''}
                         items={getVisibleTodos(item)} 
-                        allEvents={allEvents} // Pass events for linking
+                        allEvents={allEvents} 
                         onAddTodo={(text) => addTodo(text, item.i)} 
                         onUpdateTodo={updateTodo} 
                         onEditTodo={(todo) => setEditingTodo(todo)}
+                        onDeleteTodo={deleteTodo} // Passed
                         onUpdateListTitle={(t) => updateContent(item.i, { listTitle: t, title: t || 'To-Do' })}
+                        onMoveTodo={moveTodo} // Passed
                     />
                 )}
                 

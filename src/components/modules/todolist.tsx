@@ -1,25 +1,36 @@
-import React, { useState } from 'react';
-import { FaCheck, FaLink, FaUnlink } from 'react-icons/fa';
+import React, { useState, useEffect, useRef } from 'react';
+import { FaCheck, FaStickyNote } from 'react-icons/fa';
 import type { TodoItem, CalendarEvent } from '../../types';
 
 interface TodoListProps {
   moduleId: string;
   listTitle: string;
   items: TodoItem[];
-  allEvents: CalendarEvent[]; // Passed for linking
+  allEvents: CalendarEvent[];
   onAddTodo: (text: string) => void;
   onUpdateTodo: (id: string, data: Partial<TodoItem>) => void;
   onEditTodo: (item: TodoItem) => void;
+  onDeleteTodo: (id: string) => void;
   onUpdateListTitle: (title: string) => void;
+  onMoveTodo: (itemId: string, targetModuleId: string) => void; // New Prop
 }
 
 export const TodoList: React.FC<TodoListProps> = ({ 
-    items, allEvents, listTitle,
-    onAddTodo, onUpdateTodo, onEditTodo, onUpdateListTitle
+    moduleId, items, listTitle,
+    onAddTodo, onUpdateTodo, onEditTodo, onDeleteTodo, onUpdateListTitle, onMoveTodo
 }) => {
   
   const [newItemText, setNewItemText] = useState('');
-  const [linkSelectorId, setLinkSelectorId] = useState<string | null>(null);
+  
+  // Context Menu State
+  const [contextMenu, setContextMenu] = useState<{x: number, y: number, item: TodoItem} | null>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+      const handleClick = () => setContextMenu(null);
+      window.addEventListener('click', handleClick);
+      return () => window.removeEventListener('click', handleClick);
+  }, []);
 
   const commitItem = () => {
     if (newItemText.trim() === '') return;
@@ -27,21 +38,61 @@ export const TodoList: React.FC<TodoListProps> = ({
     setNewItemText('');
   };
 
-  // Filter for future events to link
-  const upcomingEvents = allEvents.filter(e => new Date(e.date) >= new Date(new Date().setHours(0,0,0,0)))
-                                  .sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime())
-                                  .slice(0, 10);
+  // --- DRAG & DROP HANDLERS ---
+  const handleDragStart = (e: React.DragEvent, item: TodoItem) => {
+      e.dataTransfer.setData('todoId', item.id);
+      e.dataTransfer.setData('originId', moduleId);
+      e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+      e.preventDefault(); // Allow dropping
+      e.dataTransfer.dropEffect = 'move';
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+      e.preventDefault();
+      const todoId = e.dataTransfer.getData('todoId');
+      const originId = e.dataTransfer.getData('originId');
+      
+      if (todoId && originId !== moduleId) {
+          onMoveTodo(todoId, moduleId);
+      }
+  };
+
+  // --- CONTEXT MENU HANDLER ---
+  const handleContextMenu = (e: React.MouseEvent, item: TodoItem) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setContextMenu({ x: e.clientX, y: e.clientY, item });
+  };
+
+  // Helper to tint color (Hex -> RGBA with low opacity)
+  const getTintedBackground = (hex: string) => {
+      // Simple hex parse
+      let c = hex.substring(1).split('');
+      if(c.length === 3) c = [c[0], c[0], c[1], c[1], c[2], c[2]];
+      const r = parseInt(c.slice(0,2).join(''), 16);
+      const g = parseInt(c.slice(2,4).join(''), 16);
+      const b = parseInt(c.slice(4,6).join(''), 16);
+      return `rgba(${r},${g},${b},0.15)`; // 15% opacity tint
+  };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, background: 'white' }}>
+    <div 
+        style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, background: 'white' }}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
+        ref={listRef}
+    >
       
-      {/* Title Header (Replaces Category Selector) */}
+      {/* Title Header */}
       <div style={{ padding: '5px 10px', borderBottom: '1px solid #f0f0f0', background: '#fafafa' }}>
           <input 
             type="text" 
             value={listTitle}
             onChange={(e) => onUpdateListTitle(e.target.value)}
-            placeholder="List Title (e.g., Groceries)"
+            placeholder="List Title..."
             onMouseDown={(e) => e.stopPropagation()}
             style={{ 
                 width: '100%', border: 'none', background: 'transparent', 
@@ -53,58 +104,43 @@ export const TodoList: React.FC<TodoListProps> = ({
       {/* List */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '10px', minHeight: 0 }}>
         {items.map(item => {
-            const linkedEvent = allEvents.find(e => e.id === item.linkedEventId);
+            const hasDesc = item.description && item.description.trim().length > 0;
+            const bgColor = getTintedBackground(item.color || '#333333');
+            const solidColor = item.color || '#333';
+
             return (
-                <div key={item.id} style={{marginBottom: '5px'}}>
+                <div 
+                    key={item.id} 
+                    className="todo-item-btn"
+                    style={{ 
+                        backgroundColor: bgColor,
+                        borderColor: `${solidColor}40`, // Low opacity border
+                    }}
+                    draggable
+                    onDragStart={(e) => handleDragStart(e, item)}
+                    onContextMenu={(e) => handleContextMenu(e, item)}
+                    onClick={() => onEditTodo(item)}
+                    onMouseDown={(e) => e.stopPropagation()} // Allow DnD but stop grid drag
+                >
                     <div 
-                        className="todo-item-btn"
-                        onClick={() => onEditTodo(item)}
-                        onMouseDown={(e) => e.stopPropagation()}
+                        onClick={(e) => { e.stopPropagation(); onUpdateTodo(item.id, { done: !item.done }); }}
+                        style={{ 
+                            cursor: 'pointer', marginRight: '8px', 
+                            color: item.done ? '#28a745' : solidColor,
+                            display: 'flex', alignItems: 'center'
+                        }}
                     >
-                        <div 
-                            onClick={(e) => { e.stopPropagation(); onUpdateTodo(item.id, { done: !item.done }); }}
-                            style={{ 
-                                cursor: 'pointer', marginRight: '8px', 
-                                color: item.done ? '#28a745' : '#ccc',
-                                display: 'flex', alignItems: 'center'
-                            }}
-                        >
-                            <FaCheck size={12} />
-                        </div>
-
-                        <span className={`todo-text ${item.done ? 'done' : ''}`}>
-                            {item.text}
-                        </span>
-
-                        {/* Link Button */}
-                        <button 
-                            onClick={(e) => { e.stopPropagation(); setLinkSelectorId(linkSelectorId === item.id ? null : item.id); }}
-                            style={{ background: 'transparent', border: 'none', color: linkedEvent ? '#007bff' : '#ccc', cursor: 'pointer', marginLeft: 'auto' }}
-                            title={linkedEvent ? `Linked to: ${linkedEvent.title}` : "Link to Event"}
-                        >
-                            {linkedEvent ? <FaLink size={10}/> : <FaUnlink size={10}/>}
-                        </button>
+                        <FaCheck size={12} />
                     </div>
 
-                    {/* Link Selector Popup */}
-                    {linkSelectorId === item.id && (
-                        <div style={{ background: '#f8f9fa', border: '1px solid #ddd', borderRadius: '4px', padding: '5px', marginBottom: '5px', fontSize: '11px' }}>
-                            <div style={{fontWeight:'bold', marginBottom:'3px'}}>Link to Event:</div>
-                            <select 
-                                onChange={(e) => {
-                                    onUpdateTodo(item.id, { linkedEventId: e.target.value });
-                                    setLinkSelectorId(null);
-                                }}
-                                value={item.linkedEventId || ''}
-                                style={{width: '100%', padding: '2px'}}
-                            >
-                                <option value="">(No Link)</option>
-                                {upcomingEvents.map(e => (
-                                    <option key={e.id} value={e.id}>
-                                        {new Date(e.date).toLocaleDateString()} - {e.title}
-                                    </option>
-                                ))}
-                            </select>
+                    <span className={`todo-text ${item.done ? 'done' : ''}`} style={{ color: '#333' }}>
+                        {item.text}
+                    </span>
+
+                    {/* Description Icon (Replaces Link Button) */}
+                    {hasDesc && (
+                        <div title="Has description" style={{ marginLeft: 'auto', color: solidColor, opacity: 0.7 }}>
+                            <FaStickyNote size={12} />
                         </div>
                     )}
                 </div>
@@ -128,6 +164,29 @@ export const TodoList: React.FC<TodoListProps> = ({
             />
         </div>
       </div>
+
+      {/* Custom Context Menu */}
+      {contextMenu && (
+          <div style={{
+              position: 'fixed', top: contextMenu.y, left: contextMenu.x,
+              background: 'white', border: '1px solid #ccc', borderRadius: '4px',
+              boxShadow: '0 2px 10px rgba(0,0,0,0.2)', zIndex: 9999,
+              display: 'flex', flexDirection: 'column', minWidth: '100px'
+          }}>
+              <button 
+                onClick={(e) => { e.stopPropagation(); onEditTodo(contextMenu.item); setContextMenu(null); }}
+                style={{ background:'transparent', border:'none', padding:'8px 12px', textAlign:'left', cursor:'pointer', fontSize:'13px', borderBottom:'1px solid #eee' }}
+              >
+                  Edit Item
+              </button>
+              <button 
+                onClick={(e) => { e.stopPropagation(); onDeleteTodo(contextMenu.item.id); setContextMenu(null); }}
+                style={{ background:'transparent', border:'none', padding:'8px 12px', textAlign:'left', cursor:'pointer', fontSize:'13px', color:'#dc3545' }}
+              >
+                  Remove Item
+              </button>
+          </div>
+      )}
     </div>
   );
 };
