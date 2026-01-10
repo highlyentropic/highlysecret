@@ -19,5 +19,6 @@ export interface TodoItem {
   color?: string; 
   category?: string; 
   originModuleId: string; 
-  linkedEventId?: string; // NEW: Link to a calendar event
+  linkedEventId?: string;
+  parentId?: string; // NEW: Supports nesting
 }

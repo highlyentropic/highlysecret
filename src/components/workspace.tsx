@@ -29,6 +29,26 @@ const MODULE_SPECS = {
     events:     { w: 14, h: 14, minW: 10, minH: 10 }
 };
 
+// 16 Themes (Header Color, Body Color) - Slightly transparent
+const THEMES = [
+    { name: 'Default', header: 'rgba(250, 250, 250, 0.95)', body: 'rgba(255, 255, 255, 0.95)' },
+    { name: 'Red', header: 'rgba(255, 205, 210, 0.9)', body: 'rgba(255, 235, 238, 0.85)' },
+    { name: 'Pink', header: 'rgba(248, 187, 208, 0.9)', body: 'rgba(252, 228, 236, 0.85)' },
+    { name: 'Purple', header: 'rgba(225, 190, 231, 0.9)', body: 'rgba(243, 229, 245, 0.85)' },
+    { name: 'Deep Purple', header: 'rgba(209, 196, 233, 0.9)', body: 'rgba(237, 231, 246, 0.85)' },
+    { name: 'Indigo', header: 'rgba(197, 202, 233, 0.9)', body: 'rgba(232, 234, 246, 0.85)' },
+    { name: 'Blue', header: 'rgba(187, 222, 251, 0.9)', body: 'rgba(227, 242, 253, 0.85)' },
+    { name: 'Light Blue', header: 'rgba(179, 229, 252, 0.9)', body: 'rgba(225, 245, 254, 0.85)' },
+    { name: 'Cyan', header: 'rgba(178, 235, 242, 0.9)', body: 'rgba(224, 247, 250, 0.85)' },
+    { name: 'Teal', header: 'rgba(178, 223, 219, 0.9)', body: 'rgba(224, 242, 241, 0.85)' },
+    { name: 'Green', header: 'rgba(200, 230, 201, 0.9)', body: 'rgba(232, 245, 233, 0.85)' },
+    { name: 'Light Green', header: 'rgba(220, 237, 200, 0.9)', body: 'rgba(241, 248, 233, 0.85)' },
+    { name: 'Lime', header: 'rgba(240, 244, 195, 0.9)', body: 'rgba(249, 251, 231, 0.85)' },
+    { name: 'Yellow', header: 'rgba(255, 249, 196, 0.9)', body: 'rgba(255, 253, 231, 0.85)' },
+    { name: 'Amber', header: 'rgba(255, 236, 179, 0.9)', body: 'rgba(255, 248, 225, 0.85)' },
+    { name: 'Orange', header: 'rgba(255, 224, 178, 0.9)', body: 'rgba(255, 243, 224, 0.85)' },
+];
+
 type ModuleType = 'notepad' | 'clock' | 'whiteboard' | 'calendar' | 'todo' | 'stickynote' | 'events';
 
 interface ModuleItem {
@@ -43,6 +63,7 @@ interface ModuleItem {
   content?: string; 
   clockMode?: 'analog' | 'digital';
   linkedCategory?: string; 
+  themeIndex?: number; // New prop for theme
 }
 
 const loadState = <T,>(key: string, defaultVal: T): T => {
@@ -119,13 +140,14 @@ export const Workspace = () => {
   const [maxRows, setMaxRows] = useState(50);
   const [showDebug, setShowDebug] = useState(false);
   
-  // Modals
+  // Modals / Popups
   const [showModal, setShowModal] = useState(false);
   const [modalData, setModalData] = useState<Partial<CalendarEvent>>({});
   const [editingTodo, setEditingTodo] = useState<TodoItem | null>(null);
   const [newCatText, setNewCatText] = useState('');
   const [editingTitleId, setEditingTitleId] = useState<string | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [paletteOpenId, setPaletteOpenId] = useState<string | null>(null); // For color picker
 
   useEffect(() => {
     const handleResize = () => {
@@ -136,6 +158,13 @@ export const Workspace = () => {
     handleResize(); 
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // Close palette when clicking outside
+  useEffect(() => {
+      const clickHandler = () => setPaletteOpenId(null);
+      window.addEventListener('click', clickHandler);
+      return () => window.removeEventListener('click', clickHandler);
   }, []);
 
   const onDragStart = (e: React.DragEvent, type: ModuleType) => {
@@ -152,9 +181,14 @@ export const Workspace = () => {
     }
     const specs = MODULE_SPECS[draggingType];
     const uniqueId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `mod_${Date.now()}`;
+    
+    // Default title
+    let defaultTitle = draggingType.charAt(0).toUpperCase() + draggingType.slice(1);
+    if (draggingType === 'todo') defaultTitle = "To-do (click to edit)";
+
     const newItem: ModuleItem = {
         i: uniqueId, x: layoutItem.x, y: layoutItem.y, w: specs.w, h: specs.h, type: draggingType,
-        title: draggingType.charAt(0).toUpperCase() + draggingType.slice(1), content: '', clockMode: 'analog', listTitle: ''
+        title: defaultTitle, content: '', clockMode: 'analog', listTitle: '', themeIndex: 0
     };
     setItems(prev => [...prev, newItem]);
     setIsDropping(false);
@@ -183,15 +217,85 @@ export const Workspace = () => {
   const openAddEventModal = (date?: Date) => { setModalData({ date: date ? date.toISOString() : new Date().toISOString(), title: '', startTime: '09:00', endTime: '10:00', location: '', color: '#007bff', notify: false, isAllDay: false }); setShowModal(true); };
   const saveEvent = () => { if (!modalData.title || !modalData.date) return; const newEvent: CalendarEvent = { id: Date.now().toString(), title: modalData.title, date: modalData.date, startTime: modalData.startTime, endTime: modalData.endTime, location: modalData.location, color: modalData.color || '#007bff', notify: modalData.notify || false, isAllDay: modalData.isAllDay }; setGlobalEvents([...globalEvents, newEvent]); setShowModal(false); };
   
-  // Todo Helpers
-  const addTodo = (text: string, moduleId: string) => setGlobalTodos([...globalTodos, { id: Date.now().toString(), text, done: false, originModuleId: moduleId, color: '#333333' }]);
-  const updateTodo = (id: string, updates: Partial<TodoItem>) => setGlobalTodos(prev => prev.map(t => t.id === id ? { ...t, ...updates } : t));
-  const deleteTodo = (id: string) => setGlobalTodos(prev => prev.filter(t => t.id !== id));
+  // --- TODO HELPERS ---
+  const addTodo = (text: string, moduleId: string, parentId?: string) => {
+      const parent = parentId ? globalTodos.find(t => t.id === parentId) : null;
+      setGlobalTodos(prev => [...prev, { 
+          id: Date.now().toString(), 
+          text, 
+          done: false, 
+          originModuleId: moduleId, 
+          parentId,
+          color: parent?.color || '#333333',
+          category: parent?.category,
+      }]);
+  };
+
+  const updateTodo = (id: string, updates: Partial<TodoItem>) => {
+      if ('done' in updates) {
+          const newStatus = updates.done!;
+          setGlobalTodos(prev => {
+              let nextTodos = [...prev];
+              const updateItem = (itemId: string, patch: Partial<TodoItem>) => {
+                  const idx = nextTodos.findIndex(t => t.id === itemId);
+                  if (idx !== -1) nextTodos[idx] = { ...nextTodos[idx], ...patch };
+              };
+              const markChildren = (pId: string) => {
+                  const children = nextTodos.filter(t => t.parentId === pId);
+                  children.forEach(c => {
+                      updateItem(c.id, { done: newStatus });
+                      markChildren(c.id);
+                  });
+              };
+              updateItem(id, { done: newStatus });
+              markChildren(id);
+
+              if (!newStatus) {
+                  let curr = nextTodos.find(t => t.id === id);
+                  while (curr && curr.parentId) {
+                      updateItem(curr.parentId, { done: false });
+                      curr = nextTodos.find(t => t.id === curr.parentId);
+                  }
+              } else {
+                  let curr = nextTodos.find(t => t.id === id);
+                  while (curr && curr.parentId) {
+                      const siblings = nextTodos.filter(t => t.parentId === curr.parentId);
+                      if (siblings.every(s => s.done)) {
+                          updateItem(curr.parentId, { done: true });
+                          curr = nextTodos.find(t => t.id === curr.parentId);
+                      } else { break; }
+                  }
+              }
+              return nextTodos;
+          });
+      } else {
+          setGlobalTodos(prev => prev.map(t => t.id === id ? { ...t, ...updates } : t));
+      }
+  };
+
+  const deleteTodo = (id: string) => {
+      const getDescendants = (rootId: string, allItems: TodoItem[]): string[] => {
+          const children = allItems.filter(i => i.parentId === rootId);
+          return [...children.map(c => c.id), ...children.flatMap(c => getDescendants(c.id, allItems))];
+      };
+      setGlobalTodos(prev => {
+          const toDelete = [id, ...getDescendants(id, prev)];
+          return prev.filter(t => !toDelete.includes(t.id));
+      });
+  };
+
   const addCategory = (cat: string) => { if (cat && !todoCategories.includes(cat)) setTodoCategories([...todoCategories, cat]); };
   const removeCategory = (cat: string) => setTodoCategories(prev => prev.filter(c => c !== cat));
   
   const moveTodo = (itemId: string, targetModuleId: string) => {
-      setGlobalTodos(prev => prev.map(t => t.id === itemId ? { ...t, originModuleId: targetModuleId } : t));
+      const getDescendants = (rootId: string, allItems: TodoItem[]): string[] => {
+          const children = allItems.filter(i => i.parentId === rootId);
+          return [...children.map(c => c.id), ...children.flatMap(c => getDescendants(c.id, allItems))];
+      };
+      setGlobalTodos(prev => {
+          const idsToMove = [itemId, ...getDescendants(itemId, prev)];
+          return prev.map(t => idsToMove.includes(t.id) ? { ...t, originModuleId: targetModuleId } : t);
+      });
   };
   
   const getVisibleTodos = (module: ModuleItem) => globalTodos.filter(t => t.originModuleId === module.i);
@@ -243,7 +347,7 @@ export const Workspace = () => {
       {showModal && (
         <div className="modal-overlay" onClick={() => setShowModal(false)}>
             <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-                {/* ... (Existing Event Modal Content) ... */}
+                {/* ... (Event Modal Content) ... */}
                 <div className="modal-header">Add Event</div>
                 <div className="modal-row"><label>Title:</label><input type="text" value={modalData.title} onChange={e => setModalData({...modalData, title: e.target.value})} /></div>
                 <div className="modal-row" style={{ flexDirection: 'row', gap: '10px' }}><div style={{flex:1}}><label>Date:</label><input type="date" value={modalData.date ? modalData.date.split('T')[0] : ''} onChange={e => setModalData({...modalData, date: new Date(e.target.value).toISOString()})} /></div><div style={{flex:1}}><label>Color:</label><input type="color" value={modalData.color} onChange={e => setModalData({...modalData, color: e.target.value})} style={{width:'100%', height:'38px'}} /></div></div>
@@ -261,7 +365,6 @@ export const Workspace = () => {
                 <div className="modal-header" style={{display:'flex', justifyContent:'space-between'}}><span>Edit Item</span><button onClick={() => { deleteTodo(editingTodo.id); setEditingTodo(null); }} style={{background:'transparent', border:'none', color:'#dc3545'}}><FaTrash /></button></div>
                 <div className="modal-row"><label>Task:</label><input type="text" value={editingTodo.text} onChange={(e) => { const val = e.target.value; setEditingTodo({...editingTodo, text: val}); updateTodo(editingTodo.id, { text: val }); }} /></div>
                 
-                {/* Markdown Enabled Description */}
                 <div className="modal-row"><label>Description (Markdown):</label><textarea rows={5} value={editingTodo.description || ''} onChange={(e) => { const val = e.target.value; setEditingTodo({...editingTodo, description: val}); updateTodo(editingTodo.id, { description: val }); }} placeholder="Type... (Supports Markdown)" /></div>
                 
                 <div className="modal-row" style={{ flexDirection: 'row', gap: '10px' }}>
@@ -269,7 +372,6 @@ export const Workspace = () => {
                     <div style={{flex: 1}}><label><FaTag /> Category:</label><select value={editingTodo.category || ''} onChange={(e) => { const val = e.target.value || undefined; setEditingTodo({...editingTodo, category: val}); updateTodo(editingTodo.id, { category: val }); }}><option value="">(None)</option>{todoCategories.map(cat => (<option key={cat} value={cat}>{cat}</option>))}</select></div>
                 </div>
 
-                {/* NEW: Link to Event Selector */}
                 <div className="modal-row" style={{borderTop: '1px solid #eee', paddingTop: '10px'}}>
                     <label><FaLink /> Link to Event:</label>
                     <select 
@@ -298,11 +400,65 @@ export const Workspace = () => {
       {/* GRID */}
       <div style={{ flex: 1, overflow: 'hidden', position: 'relative', zIndex: 1 }}> 
         <ReactGridLayout className="layout" layout={items.map(i => { const spec = MODULE_SPECS[i.type]; return { i: i.i, x: i.x, y: i.y, w: i.w, h: i.h, minW: spec.minW, minH: spec.minH }; })} cols={COLS} rowHeight={ROW_HEIGHT} width={1200} margin={[0, 0]} style={{ height: gridHeight + 'px' }} isDroppable={true} onDrop={onDrop} isBounded={true} maxRows={maxRows} compactType={null} preventCollision={true} onLayoutChange={(newLayout) => { if (isDropping) return; setItems(prevItems => prevItems.map(item => { const match = newLayout.find(l => l.i === item.i); return match ? { ...item, x: match.x, y: match.y, w: match.w, h: match.h } : item; })); }} droppingItem={{ i: 'placeholder', w: currentSpecs.w, h: currentSpecs.h }} draggableHandle=".drag-handle">
-          {items.map((item) => (
+          {items.map((item) => {
+             const theme = THEMES[item.themeIndex || 0] || THEMES[0];
+             return (
             <div key={item.i} className="grid-item">
-              <div className="drag-handle" onDoubleClick={() => setEditingTitleId(item.i)}>
-                {editingTitleId === item.i ? (<input type="text" autoFocus defaultValue={item.title || item.type} onBlur={(e) => { updateContent(item.i, { title: e.target.value }); setEditingTitleId(null); }} onKeyDown={(e) => { if(e.key === 'Enter') { updateContent(item.i, { title: e.currentTarget.value }); setEditingTitleId(null); } }} style={{ height: '18px', fontSize: '11px', border: '1px solid #007bff', color: '#333', background: 'white' }} onMouseDown={(e) => e.stopPropagation()} />) : ( <span className="module-title">{item.title || item.type}</span> )}
-                <span className="close-btn" onMouseDown={(e) => e.stopPropagation()} onClick={() => requestDelete(item.i)}>✖</span>
+              <div 
+                className="drag-handle" 
+                style={{ background: theme.header }} // Apply Theme Header
+              >
+                {editingTitleId === item.i ? (
+                    <input 
+                        type="text" 
+                        autoFocus 
+                        defaultValue={item.title || item.type} 
+                        onBlur={(e) => { updateContent(item.i, { title: e.target.value }); setEditingTitleId(null); }} 
+                        onKeyDown={(e) => { if(e.key === 'Enter') { updateContent(item.i, { title: e.currentTarget.value }); setEditingTitleId(null); } }} 
+                        style={{ height: '18px', fontSize: '11px', border: '1px solid #007bff', color: '#333', background: 'white' }} 
+                        onMouseDown={(e) => e.stopPropagation()} 
+                    />
+                ) : ( 
+                    <span 
+                        className="module-title" 
+                        onClick={(e) => { e.stopPropagation(); setEditingTitleId(item.i); }} // CHANGED: Single click editing
+                        style={{ cursor: 'text' }}
+                    >
+                        {item.title || item.type}
+                    </span> 
+                )}
+                
+                <div style={{ marginLeft: 'auto', display: 'flex', gap: '5px' }}>
+                    {/* Theme Picker Button */}
+                    {item.type === 'todo' && (
+                        <div style={{ position: 'relative' }} onMouseDown={(e) => e.stopPropagation()}>
+                            <span className="close-btn" style={{ fontSize: '12px' }} onClick={(e) => { e.stopPropagation(); setPaletteOpenId(paletteOpenId === item.i ? null : item.i); }}>
+                                <FaPalette />
+                            </span>
+                            {paletteOpenId === item.i && (
+                                <div style={{ 
+                                    position: 'absolute', top: '20px', right: 0, 
+                                    background: 'white', border: '1px solid #ccc', padding: '5px', 
+                                    zIndex: 9999, display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '4px',
+                                    boxShadow: '0 2px 10px rgba(0,0,0,0.2)', width: '100px'
+                                }}>
+                                    {THEMES.map((t, idx) => (
+                                        <div 
+                                            key={t.name}
+                                            onClick={() => updateContent(item.i, { themeIndex: idx })}
+                                            title={t.name}
+                                            style={{
+                                                width: '20px', height: '20px', borderRadius: '3px',
+                                                background: t.header, border: '1px solid #ddd', cursor: 'pointer'
+                                            }}
+                                        />
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
+                    <span className="close-btn" onMouseDown={(e) => e.stopPropagation()} onClick={() => requestDelete(item.i)}>✖</span>
+                </div>
               </div>
               
               <div className="module-content" style={{ overflow: 'hidden', flex: 1, position: 'relative' }}>
@@ -316,12 +472,13 @@ export const Workspace = () => {
                         listTitle={item.listTitle || ''}
                         items={getVisibleTodos(item)} 
                         allEvents={allEvents} 
-                        onAddTodo={(text) => addTodo(text, item.i)} 
+                        backgroundColor={theme.body} // Pass theme body color
+                        onAddTodo={(text, parentId) => addTodo(text, item.i, parentId)} 
                         onUpdateTodo={updateTodo} 
                         onEditTodo={(todo) => setEditingTodo(todo)}
-                        onDeleteTodo={deleteTodo} // Passed
+                        onDeleteTodo={deleteTodo} 
                         onUpdateListTitle={(t) => updateContent(item.i, { listTitle: t, title: t || 'To-Do' })}
-                        onMoveTodo={moveTodo} // Passed
+                        onMoveTodo={moveTodo} 
                     />
                 )}
                 
@@ -330,7 +487,8 @@ export const Workspace = () => {
                 {item.type === 'calendar' && <Calendar events={allEvents} onDayClick={(date) => openAddEventModal(date)} />}
               </div>
             </div>
-          ))}
+          );
+        })}
         </ReactGridLayout>
       </div>
     </div>

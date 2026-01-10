@@ -12,11 +12,17 @@ const createWindow = () => {
     },
   });
 
-  // Load the Vite local server
-  win.loadURL('http://localhost:5173');
-
-  // Optional: Open the DevTools (F12) automatically so we can debug
-  win.webContents.openDevTools();
+  // Determine what to load based on whether the app is packaged
+  if (app.isPackaged) {
+    // In production, load the local index.html file
+    // Assumes 'dist' and 'electron' are siblings in the package
+    win.loadFile(path.join(__dirname, '../dist/index.html'));
+  } else {
+    // In development, load the Vite local server
+    win.loadURL('http://localhost:5173');
+    // Open DevTools in dev mode
+    win.webContents.openDevTools();
+  }
 };
 
 app.whenReady().then(() => {
