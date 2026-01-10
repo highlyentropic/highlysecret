@@ -29,7 +29,7 @@ const MODULE_SPECS = {
     events:     { w: 14, h: 14, minW: 10, minH: 10 }
 };
 
-// 16 Themes (Header Color, Body Color) - Slightly transparent
+// 16 Themes (Header Color, Body Color)
 const THEMES = [
     { name: 'Default', header: 'rgba(250, 250, 250, 0.95)', body: 'rgba(255, 255, 255, 0.95)' },
     { name: 'Red', header: 'rgba(255, 205, 210, 0.9)', body: 'rgba(255, 235, 238, 0.85)' },
@@ -63,7 +63,7 @@ interface ModuleItem {
   content?: string; 
   clockMode?: 'analog' | 'digital';
   linkedCategory?: string; 
-  themeIndex?: number; // New prop for theme
+  themeIndex?: number;
 }
 
 const loadState = <T,>(key: string, defaultVal: T): T => {
@@ -100,13 +100,11 @@ export const Workspace = () => {
   }, []);
 
   const allEvents = [...holidayEvents, ...globalEvents];
-  
-  // Future events for linking
   const upcomingEvents = allEvents.filter(e => new Date(e.date) >= new Date(new Date().setHours(0,0,0,0)))
                                   .sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime())
                                   .slice(0, 15);
 
-  // --- AUTO-CHECK TODOs LINKED TO PAST EVENTS ---
+  // --- AUTO-CHECK TODOs ---
   useEffect(() => {
       const interval = setInterval(() => {
           const now = new Date();
@@ -140,14 +138,14 @@ export const Workspace = () => {
   const [maxRows, setMaxRows] = useState(50);
   const [showDebug, setShowDebug] = useState(false);
   
-  // Modals / Popups
+  // Modals
   const [showModal, setShowModal] = useState(false);
   const [modalData, setModalData] = useState<Partial<CalendarEvent>>({});
   const [editingTodo, setEditingTodo] = useState<TodoItem | null>(null);
   const [newCatText, setNewCatText] = useState('');
   const [editingTitleId, setEditingTitleId] = useState<string | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
-  const [paletteOpenId, setPaletteOpenId] = useState<string | null>(null); // For color picker
+  const [paletteOpenId, setPaletteOpenId] = useState<string | null>(null);
 
   useEffect(() => {
     const handleResize = () => {
@@ -160,7 +158,6 @@ export const Workspace = () => {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // Close palette when clicking outside
   useEffect(() => {
       const clickHandler = () => setPaletteOpenId(null);
       window.addEventListener('click', clickHandler);
@@ -181,8 +178,6 @@ export const Workspace = () => {
     }
     const specs = MODULE_SPECS[draggingType];
     const uniqueId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `mod_${Date.now()}`;
-    
-    // Default title
     let defaultTitle = draggingType.charAt(0).toUpperCase() + draggingType.slice(1);
     if (draggingType === 'todo') defaultTitle = "To-do (click to edit)";
 
@@ -212,10 +207,43 @@ export const Workspace = () => {
       setDeleteConfirmId(null);
   };
 
-  // Content Updaters
   const updateContent = (id: string, data: Partial<ModuleItem>) => setItems(prev => prev.map(i => i.i === id ? { ...i, ...data } : i));
-  const openAddEventModal = (date?: Date) => { setModalData({ date: date ? date.toISOString() : new Date().toISOString(), title: '', startTime: '09:00', endTime: '10:00', location: '', color: '#007bff', notify: false, isAllDay: false }); setShowModal(true); };
-  const saveEvent = () => { if (!modalData.title || !modalData.date) return; const newEvent: CalendarEvent = { id: Date.now().toString(), title: modalData.title, date: modalData.date, startTime: modalData.startTime, endTime: modalData.endTime, location: modalData.location, color: modalData.color || '#007bff', notify: modalData.notify || false, isAllDay: modalData.isAllDay }; setGlobalEvents([...globalEvents, newEvent]); setShowModal(false); };
+  
+  // --- EVENT HANDLING ---
+  const openAddEventModal = (date?: Date) => { 
+      setModalData({ date: date ? date.toISOString() : new Date().toISOString(), title: '', startTime: '09:00', endTime: '10:00', location: '', color: '#007bff', notify: false, isAllDay: false }); 
+      setShowModal(true); 
+  };
+  
+  const handleEditEvent = (event: CalendarEvent) => {
+      setModalData({ ...event });
+      setShowModal(true);
+  };
+
+  const saveEvent = () => { 
+      if (!modalData.title || !modalData.date) return; 
+      
+      const evtId = modalData.id || Date.now().toString();
+      const newEvent: CalendarEvent = { 
+          id: evtId, 
+          title: modalData.title, 
+          date: modalData.date, 
+          startTime: modalData.startTime, 
+          endTime: modalData.endTime, 
+          location: modalData.location, 
+          color: modalData.color || '#007bff', 
+          notify: modalData.notify || false, 
+          isAllDay: modalData.isAllDay,
+          category: modalData.category // Preserve category
+      }; 
+
+      setGlobalEvents(prev => {
+          const exists = prev.some(e => e.id === evtId);
+          if (exists) return prev.map(e => e.id === evtId ? newEvent : e);
+          return [...prev, newEvent];
+      }); 
+      setShowModal(false); 
+  };
   
   // --- TODO HELPERS ---
   const addTodo = (text: string, moduleId: string, parentId?: string) => {
@@ -347,8 +375,7 @@ export const Workspace = () => {
       {showModal && (
         <div className="modal-overlay" onClick={() => setShowModal(false)}>
             <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-                {/* ... (Event Modal Content) ... */}
-                <div className="modal-header">Add Event</div>
+                <div className="modal-header">{modalData.id ? 'Edit Event' : 'Add Event'}</div>
                 <div className="modal-row"><label>Title:</label><input type="text" value={modalData.title} onChange={e => setModalData({...modalData, title: e.target.value})} /></div>
                 <div className="modal-row" style={{ flexDirection: 'row', gap: '10px' }}><div style={{flex:1}}><label>Date:</label><input type="date" value={modalData.date ? modalData.date.split('T')[0] : ''} onChange={e => setModalData({...modalData, date: new Date(e.target.value).toISOString()})} /></div><div style={{flex:1}}><label>Color:</label><input type="color" value={modalData.color} onChange={e => setModalData({...modalData, color: e.target.value})} style={{width:'100%', height:'38px'}} /></div></div>
                 <div className="modal-row" style={{flexDirection: 'row', alignItems: 'center', gap: '10px'}}><input type="checkbox" checked={modalData.isAllDay} onChange={e => setModalData({...modalData, isAllDay: e.target.checked})} /><label onClick={() => setModalData({...modalData, isAllDay: !modalData.isAllDay})}>All Day</label></div>
@@ -406,7 +433,7 @@ export const Workspace = () => {
             <div key={item.i} className="grid-item">
               <div 
                 className="drag-handle" 
-                style={{ background: theme.header }} // Apply Theme Header
+                style={{ background: theme.header }}
               >
                 {editingTitleId === item.i ? (
                     <input 
@@ -421,7 +448,7 @@ export const Workspace = () => {
                 ) : ( 
                     <span 
                         className="module-title" 
-                        onClick={(e) => { e.stopPropagation(); setEditingTitleId(item.i); }} // CHANGED: Single click editing
+                        onClick={(e) => { e.stopPropagation(); setEditingTitleId(item.i); }}
                         style={{ cursor: 'text' }}
                     >
                         {item.title || item.type}
@@ -429,7 +456,6 @@ export const Workspace = () => {
                 )}
                 
                 <div style={{ marginLeft: 'auto', display: 'flex', gap: '5px' }}>
-                    {/* Theme Picker Button */}
                     {item.type === 'todo' && (
                         <div style={{ position: 'relative' }} onMouseDown={(e) => e.stopPropagation()}>
                             <span className="close-btn" style={{ fontSize: '12px' }} onClick={(e) => { e.stopPropagation(); setPaletteOpenId(paletteOpenId === item.i ? null : item.i); }}>
@@ -462,7 +488,16 @@ export const Workspace = () => {
               </div>
               
               <div className="module-content" style={{ overflow: 'hidden', flex: 1, position: 'relative' }}>
-                {item.type === 'notepad' && <Notepad content={item.content || ''} onChange={(txt) => updateContent(item.i, { content: txt })} />}
+                {item.type === 'notepad' && (
+                    <Notepad 
+                        content={item.content || ''} 
+                        onChange={(txt) => updateContent(item.i, { content: txt })}
+                        allTodos={globalTodos} // Pass Todos
+                        allEvents={allEvents}  // Pass Events
+                        onEditTodo={setEditingTodo}
+                        onEditEvent={handleEditEvent}
+                    />
+                )}
                 {item.type === 'clock' && <Clock mode={item.clockMode || 'analog'} onToggleMode={() => updateContent(item.i, { clockMode: item.clockMode === 'analog' ? 'digital' : 'analog' })} />}
                 {item.type === 'whiteboard' && <Whiteboard content={item.content || ''} onChange={(data) => updateContent(item.i, { content: data })} />}
                 
@@ -472,7 +507,7 @@ export const Workspace = () => {
                         listTitle={item.listTitle || ''}
                         items={getVisibleTodos(item)} 
                         allEvents={allEvents} 
-                        backgroundColor={theme.body} // Pass theme body color
+                        backgroundColor={theme.body}
                         onAddTodo={(text, parentId) => addTodo(text, item.i, parentId)} 
                         onUpdateTodo={updateTodo} 
                         onEditTodo={(todo) => setEditingTodo(todo)}
