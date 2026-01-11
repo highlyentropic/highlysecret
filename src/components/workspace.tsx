@@ -10,7 +10,7 @@ import { TodoList } from './modules/todolist';
 import { EventsList } from './modules/eventslist';
 import type { CalendarEvent, TodoItem } from '../types';
 import { StickyNote } from './modules/stickynote'; 
-import { FaRegStickyNote, FaRegClock, FaPencilAlt, FaCalendarAlt, FaCheckSquare, FaBug, FaList, FaTrash, FaPalette, FaTag, FaPlus, FaExclamationTriangle, FaLink } from 'react-icons/fa';
+import { FaRegStickyNote, FaRegClock, FaPencilAlt, FaCalendarAlt, FaCheckSquare, FaBug, FaList, FaTrash, FaPalette, FaTag, FaPlus, FaExclamationTriangle, FaLink, FaMinus, FaWindowMaximize } from 'react-icons/fa';
 
 const ReactGridLayout = WidthProvider(RGL);
 
@@ -18,6 +18,7 @@ const ReactGridLayout = WidthProvider(RGL);
 const COLS = 60; 
 const ROW_HEIGHT = 20; 
 const TOOLBAR_HEIGHT = 80;
+const FOOTER_HEIGHT = 50; // New footer for minimized apps
 
 const MODULE_SPECS = {
     notepad:    { w: 16, h: 12, minW: 16, minH: 12 },
@@ -64,6 +65,8 @@ interface ModuleItem {
   clockMode?: 'analog' | 'digital';
   linkedCategory?: string; 
   themeIndex?: number;
+  // Minimization support
+  prevPos?: { x: number, y: number, w: number, h: number }; 
 }
 
 const loadState = <T,>(key: string, defaultVal: T): T => {
@@ -74,14 +77,27 @@ const loadState = <T,>(key: string, defaultVal: T): T => {
     return defaultVal;
 };
 
+// Helper for icons map
+const MODULE_ICONS = {
+    notepad: FaRegStickyNote,
+    clock: FaRegClock,
+    whiteboard: FaPencilAlt,
+    calendar: FaCalendarAlt,
+    todo: FaCheckSquare,
+    stickynote: FaRegStickyNote,
+    events: FaList
+};
+
 export const Workspace = () => {
   const [items, setItems] = useState<ModuleItem[]>(() => loadState('ws_items', []));
+  const [minimizedItems, setMinimizedItems] = useState<ModuleItem[]>(() => loadState('ws_minimized', []));
   const [globalEvents, setGlobalEvents] = useState<CalendarEvent[]>(() => loadState('ws_events', []));
   const [globalTodos, setGlobalTodos] = useState<TodoItem[]>(() => loadState('ws_todos', []));
   const [todoCategories, setTodoCategories] = useState<string[]>(() => loadState('ws_categories', []));
   const [holidayEvents, setHolidayEvents] = useState<CalendarEvent[]>([]);
 
   useEffect(() => { localStorage.setItem('ws_items', JSON.stringify(items)); }, [items]);
+  useEffect(() => { localStorage.setItem('ws_minimized', JSON.stringify(minimizedItems)); }, [minimizedItems]);
   useEffect(() => { localStorage.setItem('ws_events', JSON.stringify(globalEvents)); }, [globalEvents]);
   useEffect(() => { localStorage.setItem('ws_todos', JSON.stringify(globalTodos)); }, [globalTodos]);
 
@@ -149,7 +165,7 @@ export const Workspace = () => {
 
   useEffect(() => {
     const handleResize = () => {
-        const h = window.innerHeight - TOOLBAR_HEIGHT;
+        const h = window.innerHeight - TOOLBAR_HEIGHT - FOOTER_HEIGHT;
         setGridHeight(h);
         setMaxRows(Math.floor(h / ROW_HEIGHT));
     };
@@ -166,11 +182,37 @@ export const Workspace = () => {
 
   const onDragStart = (e: React.DragEvent, type: ModuleType) => {
     e.dataTransfer.setData("text/plain", "");
+    e.dataTransfer.setData("moduleType", type); // Mark as module drag
     setDraggingType(type);
     setIsDropping(true);
   };
 
-  const onDrop = (layout: Layout[], layoutItem: Layout) => {
+  const onDrop = (layout: Layout[], layoutItem: Layout, event: Event) => {
+    // FIX 1: If dragging a Todo Item, CANCEL module creation
+    const dragEvent = event as unknown as React.DragEvent;
+    if (dragEvent.dataTransfer && (dragEvent.dataTransfer.types.includes('todoId') || dragEvent.dataTransfer.types.includes('reorderId'))) {
+         setIsDropping(false);
+         return; // Do NOT create a module
+    }
+
+    // Handle Restore from Minimized Drag
+    const restoreId = dragEvent.dataTransfer?.getData('restoreId');
+    if (restoreId) {
+        const itemToRestore = minimizedItems.find(i => i.i === restoreId);
+        if (itemToRestore) {
+            // Restore to dropped position
+            const restored = { 
+                ...itemToRestore, 
+                x: layoutItem.x, y: layoutItem.y 
+                // w and h preserved from minimized state
+            };
+            setItems(prev => [...prev, restored]);
+            setMinimizedItems(prev => prev.filter(i => i.i !== restoreId));
+        }
+        setIsDropping(false);
+        return;
+    }
+
     if (draggingType === 'clock' && items.some(i => i.type === 'clock')) {
         alert("Only one clock allowed!");
         setIsDropping(false);
@@ -178,6 +220,7 @@ export const Workspace = () => {
     }
     const specs = MODULE_SPECS[draggingType];
     const uniqueId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `mod_${Date.now()}`;
+    
     let defaultTitle = draggingType.charAt(0).toUpperCase() + draggingType.slice(1);
     if (draggingType === 'todo') defaultTitle = "To-do (click to edit)";
 
@@ -187,6 +230,37 @@ export const Workspace = () => {
     };
     setItems(prev => [...prev, newItem]);
     setIsDropping(false);
+  };
+
+  // --- MINIMIZATION LOGIC ---
+  const minimizeModule = (id: string) => {
+      const item = items.find(i => i.i === id);
+      if (!item) return;
+      
+      // Save position for restore
+      const itemWithPos = { ...item, prevPos: { x: item.x, y: item.y, w: item.w, h: item.h } };
+      
+      setMinimizedItems(prev => [...prev, itemWithPos]);
+      setItems(prev => prev.filter(i => i.i !== id));
+  };
+
+  const restoreModule = (id: string, dropX?: number, dropY?: number) => {
+      const item = minimizedItems.find(i => i.i === id);
+      if (!item) return;
+
+      const newX = dropX !== undefined ? dropX : (item.prevPos?.x || 0);
+      const newY = dropY !== undefined ? dropY : (item.prevPos?.y || 0);
+      
+      // Check collision simply by letting RGL handle it or just appending
+      const restoredItem = { 
+          ...item, 
+          x: newX, y: newY, 
+          w: item.prevPos?.w || item.w, 
+          h: item.prevPos?.h || item.h 
+      };
+      
+      setItems(prev => [...prev, restoredItem]);
+      setMinimizedItems(prev => prev.filter(i => i.i !== id));
   };
 
   const requestDelete = (id: string) => {
@@ -316,13 +390,69 @@ export const Workspace = () => {
   const removeCategory = (cat: string) => setTodoCategories(prev => prev.filter(c => c !== cat));
   
   const moveTodo = (itemId: string, targetModuleId: string) => {
+      // Recursive move
       const getDescendants = (rootId: string, allItems: TodoItem[]): string[] => {
           const children = allItems.filter(i => i.parentId === rootId);
           return [...children.map(c => c.id), ...children.flatMap(c => getDescendants(c.id, allItems))];
       };
+
       setGlobalTodos(prev => {
-          const idsToMove = [itemId, ...getDescendants(itemId, prev)];
-          return prev.map(t => idsToMove.includes(t.id) ? { ...t, originModuleId: targetModuleId } : t);
+          const descendants = getDescendants(itemId, prev);
+          const idsToMove = [itemId, ...descendants];
+          
+          return prev.map(t => {
+              if (idsToMove.includes(t.id)) {
+                  // FIX 2: If we are moving the ROOT item of this subtree (the one dragged),
+                  // we MUST reset its parentId if it's moving to a new module, otherwise
+                  // it refers to a parent that doesn't exist in the new view.
+                  // (Unless we support cross-module parenting, which is complex. Safest is to make it root).
+                  let newParentId = t.parentId;
+                  if (t.id === itemId && t.originModuleId !== targetModuleId) {
+                      newParentId = undefined; 
+                  }
+                  
+                  return { ...t, originModuleId: targetModuleId, parentId: newParentId };
+              }
+              return t;
+          });
+      });
+  };
+
+  const reorderTodo = (draggedId: string, targetId: string | null, position: 'before' | 'after' | 'inside', moduleId: string) => {
+      setGlobalTodos(prev => {
+          const draggedItem = prev.find(t => t.id === draggedId);
+          if (!draggedItem) return prev;
+
+          let newTodos = prev.filter(t => t.id !== draggedId); // Remove temporarily
+          const targetIndex = newTodos.findIndex(t => t.id === targetId);
+
+          // Update item properties based on drop
+          let updatedItem = { ...draggedItem, originModuleId: moduleId };
+          
+          // Logic for reordering
+          // Since simple array order defines rendering order for root items, we just splice it in.
+          // For nested items, we need to update parentId.
+          
+          if (targetId && targetIndex !== -1) {
+              const targetItem = prev.find(t => t.id === targetId)!;
+              
+              if (position === 'inside') {
+                  updatedItem.parentId = targetId;
+                  // Append to end of list or handled by UI structure
+              } else {
+                  updatedItem.parentId = targetItem.parentId; // Share parent
+              }
+              
+              // Insert at correct index
+              let insertIndex = position === 'after' ? targetIndex + 1 : targetIndex;
+              newTodos.splice(insertIndex, 0, updatedItem);
+          } else {
+              // Dropped on empty space or header -> make root
+              updatedItem.parentId = undefined;
+              newTodos.push(updatedItem);
+          }
+
+          return newTodos;
       });
   };
   
@@ -331,10 +461,10 @@ export const Workspace = () => {
   const hasClock = items.some(i => i.type === 'clock');
 
   return (
-    <div className="app-container" style={{ position: 'relative' }}>
+    <div className="app-container" style={{ position: 'relative', height: '100vh', display: 'flex', flexDirection: 'column' }}>
       
       {/* TOOLBAR */}
-      <div className="toolbar" style={{ height: TOOLBAR_HEIGHT }}>
+      <div className="toolbar" style={{ height: TOOLBAR_HEIGHT, flexShrink: 0 }}>
         {([
             { type: 'notepad', label: 'Notepad', Icon: FaRegStickyNote, color: '#007bff' },
             { type: 'stickynote', label: 'Sticky', Icon: FaRegStickyNote, color: '#fdd835' },
@@ -483,6 +613,16 @@ export const Workspace = () => {
                             )}
                         </div>
                     )}
+                    {/* Minimize Button */}
+                    <span 
+                        className="close-btn" 
+                        onMouseDown={(e) => e.stopPropagation()} 
+                        onClick={() => minimizeModule(item.i)}
+                        title="Minimize"
+                    >
+                        <FaMinus size={10} />
+                    </span>
+
                     <span className="close-btn" onMouseDown={(e) => e.stopPropagation()} onClick={() => requestDelete(item.i)}>✖</span>
                 </div>
               </div>
@@ -514,6 +654,7 @@ export const Workspace = () => {
                         onDeleteTodo={deleteTodo} 
                         onUpdateListTitle={(t) => updateContent(item.i, { listTitle: t, title: t || 'To-Do' })}
                         onMoveTodo={moveTodo} 
+                        onReorderTodo={(dragId, targetId, pos) => reorderTodo(dragId, targetId, pos, item.i)}
                     />
                 )}
                 
@@ -525,6 +666,39 @@ export const Workspace = () => {
           );
         })}
         </ReactGridLayout>
+      </div>
+
+      {/* MINIMIZED BAR */}
+      <div style={{ height: FOOTER_HEIGHT, background: '#f8f9fa', borderTop: '1px solid #ccc', display: 'flex', alignItems: 'center', padding: '0 10px', gap: '10px', overflowX: 'auto', zIndex: 100 }}>
+          {minimizedItems.map(item => {
+              const Icon = MODULE_ICONS[item.type];
+              const theme = THEMES[item.themeIndex || 0] || THEMES[0];
+              return (
+                  <div 
+                    key={item.i}
+                    draggable
+                    onDragStart={(e) => {
+                        e.dataTransfer.setData('restoreId', item.i);
+                        setIsDropping(true);
+                    }}
+                    onClick={() => restoreModule(item.i)}
+                    style={{ 
+                        display: 'flex', alignItems: 'center', gap: '8px',
+                        padding: '5px 10px', borderRadius: '4px',
+                        background: theme.header,
+                        border: '1px solid #ddd', cursor: 'pointer',
+                        userSelect: 'none',
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+                        minWidth: '120px', maxWidth: '200px'
+                    }}
+                  >
+                      <Icon size={14} />
+                      <span style={{ fontSize: '12px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {item.title || item.type}
+                      </span>
+                  </div>
+              )
+          })}
       </div>
     </div>
   );

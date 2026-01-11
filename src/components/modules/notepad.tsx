@@ -99,7 +99,7 @@ const ReferenceNode = Extension.create({
     name: 'referenceNode',
     group: 'inline',
     inline: true,
-    selectable: true,
+    selectable: false, // Make strictly non-selectable to behave like a button
     atom: true, 
 
     addAttributes() {
@@ -353,20 +353,18 @@ export const Notepad: React.FC<NotepadProps> = ({
             padding: 4px; 
             border-radius: 3px; 
             color: #555;
-            font-size: 11px; /* Constraint size */
+            font-size: 11px;
             transition: background-color 0.2s ease, opacity 0.2s ease;
         }
         
         .notepad-toolbar button svg {
-            width: 1.2em; /* Ensure icon is small */
+            width: 1.2em; 
             height: 1.2em;
         }
 
-        /* Hover and Active states hidden by default (transparent background) */
         .notepad-toolbar button:hover { background-color: transparent; }
         .notepad-toolbar button.active { background-color: transparent; color: #007bff; }
         
-        /* Reveal backgrounds when toolbar is hovered */
         .notepad-toolbar:hover button:hover { background-color: #eee; }
         .notepad-toolbar:hover button.active { background-color: #e2e6ea; }
         

@@ -7,18 +7,19 @@ interface TodoListProps {
   listTitle: string;
   items: TodoItem[];
   allEvents: CalendarEvent[];
-  backgroundColor?: string; // NEW PROP
+  backgroundColor?: string;
   onAddTodo: (text: string, parentId?: string) => void;
   onUpdateTodo: (id: string, data: Partial<TodoItem>) => void;
   onEditTodo: (item: TodoItem) => void;
   onDeleteTodo: (id: string) => void;
   onUpdateListTitle: (title: string) => void;
   onMoveTodo: (itemId: string, targetModuleId: string) => void; 
+  onReorderTodo: (itemId: string, targetId: string | null, position: 'before' | 'after' | 'inside') => void; // New prop
 }
 
 export const TodoList: React.FC<TodoListProps> = ({ 
     moduleId, items, listTitle, backgroundColor = 'white',
-    onAddTodo, onUpdateTodo, onEditTodo, onDeleteTodo, onUpdateListTitle, onMoveTodo
+    onAddTodo, onUpdateTodo, onEditTodo, onDeleteTodo, onUpdateListTitle, onMoveTodo, onReorderTodo
 }) => {
   
   const [newItemText, setNewItemText] = useState('');
@@ -56,6 +57,7 @@ export const TodoList: React.FC<TodoListProps> = ({
   const handleDragStart = (e: React.DragEvent, item: TodoItem) => {
       e.dataTransfer.setData('todoId', item.id);
       e.dataTransfer.setData('originId', moduleId);
+      e.dataTransfer.setData('reorderId', item.id); // Add specific reorder flag
       e.dataTransfer.effectAllowed = 'move';
       e.stopPropagation(); 
   };
@@ -66,14 +68,20 @@ export const TodoList: React.FC<TodoListProps> = ({
       e.stopPropagation();
   };
 
-  const handleDrop = (e: React.DragEvent) => {
+  const handleDrop = (e: React.DragEvent, targetId: string | null = null, position: 'before' | 'after' | 'inside' = 'after') => {
       e.preventDefault();
       e.stopPropagation();
       const todoId = e.dataTransfer.getData('todoId');
       const originId = e.dataTransfer.getData('originId');
       
-      if (todoId && originId !== moduleId) {
+      if (!todoId) return;
+
+      if (originId !== moduleId) {
+          // Move from another module
           onMoveTodo(todoId, moduleId);
+      } else {
+          // Reorder within same module
+          onReorderTodo(todoId, targetId, position);
       }
   };
 
@@ -103,12 +111,25 @@ export const TodoList: React.FC<TodoListProps> = ({
       const isAddingSub = addingSubItemTo === item.id;
 
       return (
-          // CHANGED: Hover event moved to container to maintain visibility over button
           <div 
             key={item.id} 
             style={{ display: 'flex', flexDirection: 'column' }}
             onMouseEnter={(e) => { e.stopPropagation(); setHoveredItemId(item.id); }}
             onMouseLeave={(e) => { e.stopPropagation(); if(hoveredItemId === item.id) setHoveredItemId(null); }}
+            onDragOver={handleDragOver}
+            onDrop={(e) => {
+                // Determine if dropping inside (bottom half) or before (top half) could be complex
+                // For simplicity: Drop ON item = inside (nest), Drop on edge (implement later)
+                // Let's simple check if we are dropping ON the item -> reorder 'after' or 'inside'
+                // For this implementation, dropping on an item makes it a child or sibling? 
+                // Let's default to: Drop here = put 'after' this item.
+                // To nest, maybe drag to the indent space? 
+                // Simplest UX: Drop on top half = before, bottom half = after.
+                const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                const offsetY = e.clientY - rect.top;
+                if (offsetY < 10) handleDrop(e, item.id, 'before');
+                else handleDrop(e, item.id, 'after'); // Default to sibling reorder
+            }}
           >
             <div 
                 className="todo-item-btn"
@@ -195,7 +216,7 @@ export const TodoList: React.FC<TodoListProps> = ({
     <div 
         style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, background: backgroundColor }}
         onDragOver={handleDragOver}
-        onDrop={handleDrop}
+        onDrop={(e) => handleDrop(e, null, 'after')} // Drop on empty space
         ref={listRef}
     >
       

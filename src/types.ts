@@ -20,5 +20,5 @@ export interface TodoItem {
   category?: string; 
   originModuleId: string; 
   linkedEventId?: string;
-  parentId?: string; // NEW: Supports nesting
+  parentId?: string;
 }
