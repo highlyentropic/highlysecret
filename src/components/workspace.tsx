@@ -10,7 +10,7 @@ import { TodoList } from './modules/todolist';
 import { EventsList } from './modules/eventslist';
 import type { CalendarEvent, TodoItem } from '../types';
 import { StickyNote } from './modules/stickynote'; 
-import { FaRegStickyNote, FaRegClock, FaPencilAlt, FaCalendarAlt, FaCheckSquare, FaBug, FaList, FaTrash, FaPalette, FaTag, FaPlus, FaExclamationTriangle, FaLink, FaMinus, FaWindowMaximize } from 'react-icons/fa';
+import { FaRegStickyNote, FaRegClock, FaPencilAlt, FaCalendarAlt, FaCheckSquare, FaList, FaTrash, FaPalette, FaExclamationTriangle, FaMinus, FaWindowMaximize } from 'react-icons/fa';
 
 const ReactGridLayout = WidthProvider(RGL);
 
@@ -62,7 +62,7 @@ interface ModuleItem {
   title?: string;
   listTitle?: string;
   content?: string; 
-  clockMode?: 'analog' | 'digital';
+  clockMode?: 'analog' | 'digital' | 'timer';
   linkedCategory?: string; 
   themeIndex?: number;
   // Minimization support
@@ -93,7 +93,6 @@ export const Workspace = () => {
   const [minimizedItems, setMinimizedItems] = useState<ModuleItem[]>(() => loadState('ws_minimized', []));
   const [globalEvents, setGlobalEvents] = useState<CalendarEvent[]>(() => loadState('ws_events', []));
   const [globalTodos, setGlobalTodos] = useState<TodoItem[]>(() => loadState('ws_todos', []));
-  const [todoCategories, setTodoCategories] = useState<string[]>(() => loadState('ws_categories', []));
   const [holidayEvents, setHolidayEvents] = useState<CalendarEvent[]>([]);
 
   useEffect(() => { localStorage.setItem('ws_items', JSON.stringify(items)); }, [items]);
@@ -116,9 +115,6 @@ export const Workspace = () => {
   }, []);
 
   const allEvents = [...holidayEvents, ...globalEvents];
-  const upcomingEvents = allEvents.filter(e => new Date(e.date) >= new Date(new Date().setHours(0,0,0,0)))
-                                  .sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime())
-                                  .slice(0, 15);
 
   // --- AUTO-CHECK TODOs ---
   useEffect(() => {
@@ -152,13 +148,11 @@ export const Workspace = () => {
   const [isDropping, setIsDropping] = useState(false);
   const [gridHeight, setGridHeight] = useState(800);
   const [maxRows, setMaxRows] = useState(50);
-  const [showDebug, setShowDebug] = useState(false);
   
   // Modals
   const [showModal, setShowModal] = useState(false);
   const [modalData, setModalData] = useState<Partial<CalendarEvent>>({});
   const [editingTodo, setEditingTodo] = useState<TodoItem | null>(null);
-  const [newCatText, setNewCatText] = useState('');
   const [editingTitleId, setEditingTitleId] = useState<string | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [paletteOpenId, setPaletteOpenId] = useState<string | null>(null);
@@ -329,7 +323,6 @@ export const Workspace = () => {
           originModuleId: moduleId, 
           parentId,
           color: parent?.color || '#333333',
-          category: parent?.category,
       }]);
   };
 
@@ -386,8 +379,6 @@ export const Workspace = () => {
       });
   };
 
-  const addCategory = (cat: string) => { if (cat && !todoCategories.includes(cat)) setTodoCategories([...todoCategories, cat]); };
-  const removeCategory = (cat: string) => setTodoCategories(prev => prev.filter(c => c !== cat));
   
   const moveTodo = (itemId: string, targetModuleId: string) => {
       // Recursive move
@@ -479,11 +470,6 @@ export const Workspace = () => {
                 <span style={{fontSize: '9px', marginTop: '4px'}}>{tool.label}</span>
             </div>
         ))}
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '5px' }}>
-            <button onClick={() => setShowDebug(!showDebug)} style={{ border: '1px solid #ccc', background: showDebug ? '#ffeeba' : 'white', padding: '5px 10px', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                <FaBug /> {showDebug ? 'Debug ON' : 'Debug OFF'}
-            </button>
-        </div>
       </div>
 
       {/* CONFIRM DELETE MODAL */}
@@ -526,29 +512,7 @@ export const Workspace = () => {
                 
                 <div className="modal-row" style={{ flexDirection: 'row', gap: '10px' }}>
                     <div style={{flex: 1}}><label><FaPalette /> Color:</label><input type="color" value={editingTodo.color || '#333333'} onChange={(e) => { const val = e.target.value; setEditingTodo({...editingTodo, color: val}); updateTodo(editingTodo.id, { color: val }); }} /></div>
-                    <div style={{flex: 1}}><label><FaTag /> Category:</label><select value={editingTodo.category || ''} onChange={(e) => { const val = e.target.value || undefined; setEditingTodo({...editingTodo, category: val}); updateTodo(editingTodo.id, { category: val }); }}><option value="">(None)</option>{todoCategories.map(cat => (<option key={cat} value={cat}>{cat}</option>))}</select></div>
                 </div>
-
-                <div className="modal-row" style={{borderTop: '1px solid #eee', paddingTop: '10px'}}>
-                    <label><FaLink /> Link to Event:</label>
-                    <select 
-                        value={editingTodo.linkedEventId || ''} 
-                        onChange={(e) => {
-                            const val = e.target.value || undefined;
-                            setEditingTodo({...editingTodo, linkedEventId: val});
-                            updateTodo(editingTodo.id, { linkedEventId: val });
-                        }}
-                    >
-                        <option value="">(No Link)</option>
-                        {upcomingEvents.map(e => (
-                            <option key={e.id} value={e.id}>
-                                {new Date(e.date).toLocaleDateString()} - {e.title}
-                            </option>
-                        ))}
-                    </select>
-                </div>
-
-                <div className="modal-row" style={{borderTop: '1px solid #eee', paddingTop: '10px', marginTop: '5px'}}><label style={{fontSize:'11px'}}>Manage Categories:</label><div style={{display:'flex', gap:'5px'}}><input type="text" placeholder="New category..." value={newCatText} onChange={(e) => setNewCatText(e.target.value)} style={{flex:1}} /><button onClick={() => { if(newCatText) { addCategory(newCatText); setNewCatText(''); } }} style={{background:'#28a745', color:'white', border:'none', borderRadius:'4px', padding:'0 10px'}}><FaPlus /></button></div><div style={{display:'flex', flexWrap:'wrap', gap:'5px', marginTop:'5px'}}>{todoCategories.map(cat => (<span key={cat} className="category-tag" style={{background:'#eee', padding:'2px 5px', display:'flex', alignItems:'center', gap:'5px'}}>{cat}<button onClick={() => removeCategory(cat)} style={{border:'none', background:'transparent', color:'#999', cursor:'pointer', padding:0, fontSize:'10px'}}>✕</button></span>))}</div></div>
                 <div className="modal-actions"><button onClick={() => setEditingTodo(null)} style={{background: '#007bff', color: 'white', border: 'none', padding: '8px 15px', borderRadius: '4px'}}>Done</button></div>
             </div>
         </div>
@@ -632,13 +596,31 @@ export const Workspace = () => {
                     <Notepad 
                         content={item.content || ''} 
                         onChange={(txt) => updateContent(item.i, { content: txt })}
-                        allTodos={globalTodos} // Pass Todos
                         allEvents={allEvents}  // Pass Events
-                        onEditTodo={setEditingTodo}
                         onEditEvent={handleEditEvent}
                     />
                 )}
-                {item.type === 'clock' && <Clock mode={item.clockMode || 'analog'} onToggleMode={() => updateContent(item.i, { clockMode: item.clockMode === 'analog' ? 'digital' : 'analog' })} />}
+                {item.type === 'clock' && (
+                  <Clock 
+                    mode={item.clockMode || 'analog'} 
+                    onToggleMode={() => {
+                      const currentMode = item.clockMode || 'analog';
+                      if (currentMode === 'analog') {
+                        updateContent(item.i, { clockMode: 'digital' });
+                      } else if (currentMode === 'digital') {
+                        updateContent(item.i, { clockMode: 'analog' });
+                      }
+                    }}
+                    onToggleTimer={() => {
+                      const currentMode = item.clockMode || 'analog';
+                      if (currentMode === 'timer') {
+                        updateContent(item.i, { clockMode: 'analog' });
+                      } else {
+                        updateContent(item.i, { clockMode: 'timer' });
+                      }
+                    }}
+                  />
+                )}
                 {item.type === 'whiteboard' && <Whiteboard content={item.content || ''} onChange={(data) => updateContent(item.i, { content: data })} />}
                 
                 {item.type === 'todo' && (

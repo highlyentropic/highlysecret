@@ -11,9 +11,9 @@ import { Image } from '@tiptap/extension-image';
 import { Placeholder } from '@tiptap/extension-placeholder';
 import { 
     FaBold, FaItalic, FaStrikethrough, FaListUl, FaListOl, FaTasks, 
-    FaTable, FaImage, FaUndo, FaRedo, FaLink, FaCalendarAlt, FaCheckSquare 
+    FaTable, FaImage, FaUndo, FaRedo, FaCalendarAlt
 } from 'react-icons/fa';
-import type { TodoItem, CalendarEvent } from '../../types';
+import type { CalendarEvent } from '../../types';
 
 // --- CUSTOM NODES & EXTENSIONS ---
 
@@ -59,8 +59,11 @@ const ReferenceNodeComponent = ({ node }: any) => {
     const isEvent = type === 'event';
     
     const handleClick = () => {
-        const event = new CustomEvent('open-ref-editor', { detail: { id, type } });
-        window.dispatchEvent(event);
+        // Only handle events, todos are no longer supported
+        if (isEvent) {
+            const event = new CustomEvent('open-ref-editor', { detail: { id, type } });
+            window.dispatchEvent(event);
+        }
     };
 
     return (
@@ -71,11 +74,11 @@ const ReferenceNodeComponent = ({ node }: any) => {
                 style={{
                     display: 'inline-flex', alignItems: 'center', gap: '4px',
                     background: '#f0f0f0', borderRadius: '12px', padding: '2px 8px',
-                    fontSize: '11px', cursor: 'pointer', border: `1px solid ${color}40`,
+                    fontSize: '11px', cursor: isEvent ? 'pointer' : 'default', border: `1px solid ${color}40`,
                     color: '#333', userSelect: 'none'
                 }}
             >
-                {isEvent ? <FaCalendarAlt color={color} size={10} /> : <FaCheckSquare color={color} size={10} />}
+                {isEvent ? <FaCalendarAlt color={color} size={10} /> : <span style={{ color }}>•</span>}
                 <span style={{ fontWeight: 500 }}>{label}</span>
             </span>
         </NodeViewWrapper>
@@ -127,34 +130,28 @@ const ReferenceNode = Extension.create({
 interface NotepadProps {
     content: string;
     onChange: (text: string) => void;
-    allTodos: TodoItem[];
     allEvents: CalendarEvent[];
-    onEditTodo: (item: TodoItem) => void;
     onEditEvent: (event: CalendarEvent) => void;
 }
 
 export const Notepad: React.FC<NotepadProps> = ({ 
-    content, onChange, allTodos, allEvents, onEditTodo, onEditEvent 
+    content, onChange, allEvents, onEditEvent 
 }) => {
   
   const [showTablePicker, setShowTablePicker] = useState(false);
-  const [showLinkPicker, setShowLinkPicker] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
       const handler = (e: any) => {
           const { id, type } = e.detail;
-          if (type === 'todo') {
-              const item = allTodos.find(t => t.id === id);
-              if (item) onEditTodo(item);
-          } else {
+          if (type === 'event') {
               const evt = allEvents.find(ev => ev.id === id);
               if (evt) onEditEvent(evt);
           }
       };
       window.addEventListener('open-ref-editor', handler);
       return () => window.removeEventListener('open-ref-editor', handler);
-  }, [allTodos, allEvents]);
+  }, [allEvents, onEditEvent]);
 
   const editor = useEditor({
     extensions: [
@@ -231,24 +228,6 @@ export const Notepad: React.FC<NotepadProps> = ({
       }
   };
 
-  const insertReference = (id: string, type: 'todo' | 'event') => {
-      let label = 'Ref';
-      let color = '#333';
-      
-      if (type === 'todo') {
-          const t = allTodos.find(x => x.id === id);
-          if (t) { label = t.text; color = t.color || '#333'; }
-      } else {
-          const e = allEvents.find(x => x.id === id);
-          if (e) { label = e.title; color = e.color || '#007bff'; }
-      }
-
-      editor?.chain().focus().insertContent({
-          type: 'referenceNode',
-          attrs: { id, type, label, color }
-      }).insertContent(' ').run(); 
-      setShowLinkPicker(false);
-  };
 
   if (!editor) return null;
 
@@ -297,30 +276,6 @@ export const Notepad: React.FC<NotepadProps> = ({
         {/* Image */}
         <button onClick={() => fileInputRef.current?.click()}><FaImage/></button>
         <input type="file" ref={fileInputRef} onChange={handleImageUpload} style={{display:'none'}} accept="image/*" />
-        
-        {/* Link Picker */}
-        <div style={{position:'relative'}}>
-            <button onClick={() => setShowLinkPicker(!showLinkPicker)}><FaLink/></button>
-            {showLinkPicker && (
-                <div style={{
-                    position:'absolute', top:'100%', left:0, zIndex:20, background:'white', border:'1px solid #ccc',
-                    width:'200px', maxHeight:'200px', overflowY:'auto', boxShadow:'0 2px 10px rgba(0,0,0,0.1)', display: 'flex', flexDirection: 'column'
-                }}>
-                    <div style={{padding:'5px', background:'#eee', fontSize:'10px', fontWeight:'bold'}}>EVENTS</div>
-                    {allEvents.map(e => (
-                        <div key={e.id} onClick={() => insertReference(e.id, 'event')} className="picker-item">
-                            {e.title}
-                        </div>
-                    ))}
-                    <div style={{padding:'5px', background:'#eee', fontSize:'10px', fontWeight:'bold'}}>TODOS</div>
-                    {allTodos.map(t => (
-                        <div key={t.id} onClick={() => insertReference(t.id, 'todo')} className="picker-item">
-                            {t.text}
-                        </div>
-                    ))}
-                </div>
-            )}
-        </div>
       </div>
 
       <EditorContent 
