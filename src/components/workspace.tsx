@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import RGL, { WidthProvider, Layout } from 'react-grid-layout';
 import Holidays from 'date-holidays';
 import _ from 'lodash';
@@ -10,7 +10,7 @@ import { TodoList } from './modules/todolist';
 import { EventsList } from './modules/eventslist';
 import type { CalendarEvent, TodoItem } from '../types';
 import { StickyNote } from './modules/stickynote'; 
-import { FaRegStickyNote, FaRegClock, FaPencilAlt, FaCalendarAlt, FaCheckSquare, FaList, FaTrash, FaPalette, FaExclamationTriangle, FaMinus, FaWindowMaximize } from 'react-icons/fa';
+import { FaRegStickyNote, FaRegClock, FaPencilAlt, FaCalendarAlt, FaCheckSquare, FaList, FaTrash, FaPalette, FaExclamationTriangle, FaMinus, FaTh, FaBars } from 'react-icons/fa';
 
 const ReactGridLayout = WidthProvider(RGL);
 
@@ -21,13 +21,13 @@ const TOOLBAR_HEIGHT = 80;
 const FOOTER_HEIGHT = 50; // New footer for minimized apps
 
 const MODULE_SPECS = {
-    notepad:    { w: 16, h: 12, minW: 16, minH: 12 },
-    clock:      { w: 8, h: 8, minW: 8, minH: 8 },
-    whiteboard: { w: 16, h: 16, minW: 8, minH: 8 },
-    calendar:   { w: 12, h: 12, minW: 12, minH: 12 }, 
-    todo:       { w: 12, h: 8, minW: 12, minH: 8 },
+    notepad:    { w: 16, h: 12, minW: 16, minH: 12, maxW: undefined, maxH: undefined },
+    clock:      { w: 8, h: 8, minW: 8, minH: 8, maxW: undefined, maxH: undefined },
+    whiteboard: { w: 16, h: 16, minW: 8, minH: 8, maxW: undefined, maxH: undefined },
+    calendar:   { w: 12, h: 12, minW: 12, minH: 12, maxW: undefined, maxH: undefined }, 
+    todo:       { w: 12, h: 8, minW: 12, minH: 8, maxW: undefined, maxH: undefined },
     stickynote: { w: 8, h: 8, minW: 8, minH: 8, maxW: 8, maxH: 8 }, 
-    events:     { w: 14, h: 14, minW: 10, minH: 10 }
+    events:     { w: 14, h: 14, minW: 10, minH: 10, maxW: undefined, maxH: undefined }
 };
 
 // 16 Themes (Header Color, Body Color)
@@ -66,7 +66,10 @@ interface ModuleItem {
   linkedCategory?: string; 
   themeIndex?: number;
   // Minimization support
-  prevPos?: { x: number, y: number, w: number, h: number }; 
+  prevPos?: { x: number, y: number, w: number, h: number };
+  // Stacked mode support
+  groupId?: string;
+  rowIndex?: number;
 }
 
 const loadState = <T,>(key: string, defaultVal: T): T => {
@@ -89,16 +92,56 @@ const MODULE_ICONS = {
 };
 
 export const Workspace = () => {
-  const [items, setItems] = useState<ModuleItem[]>(() => loadState('ws_items', []));
+  // Load initial view type
+  const initialViewType = loadState<'free' | 'stacked'>('ws_viewType', 'free');
+  
+  // Load layouts for both modes
+  const freeLayout = loadState<ModuleItem[]>('ws_items_free', []);
+  const stackedLayout = loadState<ModuleItem[]>('ws_items_stacked', []);
+  const stackedGroups = loadState<[string, string[]][]>('ws_groups_stacked', []);
+  
+  // Initialize items based on current view type
+  const [items, setItems] = useState<ModuleItem[]>(() => {
+    if (initialViewType === 'stacked') {
+      return stackedLayout.length > 0 ? stackedLayout : freeLayout;
+    } else {
+      return freeLayout.length > 0 ? freeLayout : [];
+    }
+  });
+  
   const [minimizedItems, setMinimizedItems] = useState<ModuleItem[]>(() => loadState('ws_minimized', []));
   const [globalEvents, setGlobalEvents] = useState<CalendarEvent[]>(() => loadState('ws_events', []));
   const [globalTodos, setGlobalTodos] = useState<TodoItem[]>(() => loadState('ws_todos', []));
   const [holidayEvents, setHolidayEvents] = useState<CalendarEvent[]>([]);
+  const [viewType, setViewType] = useState<'free' | 'stacked'>(initialViewType);
+  const [moduleGroups, setModuleGroups] = useState<Map<string, string[]>>(() => {
+    const groupsMap = new Map<string, string[]>();
+    if (initialViewType === 'stacked') {
+      stackedGroups.forEach(([groupId, moduleIds]) => groupsMap.set(groupId, moduleIds));
+    }
+    return groupsMap;
+  });
+  const prevLayoutRef = useRef<Map<string, { w: number; h: number }>>(new Map());
 
-  useEffect(() => { localStorage.setItem('ws_items', JSON.stringify(items)); }, [items]);
+  // Save layouts separately based on view type
+  useEffect(() => {
+    if (viewType === 'free') {
+      localStorage.setItem('ws_items_free', JSON.stringify(items));
+      // Save groups as array for free mode (usually empty, but preserve structure)
+      const freeGroupsArray = Array.from(moduleGroups.entries());
+      localStorage.setItem('ws_groups_free', JSON.stringify(freeGroupsArray));
+    } else {
+      localStorage.setItem('ws_items_stacked', JSON.stringify(items));
+      // Save groups as array for stacked mode
+      const stackedGroupsArray = Array.from(moduleGroups.entries());
+      localStorage.setItem('ws_groups_stacked', JSON.stringify(stackedGroupsArray));
+    }
+  }, [items, viewType, moduleGroups]);
+  
   useEffect(() => { localStorage.setItem('ws_minimized', JSON.stringify(minimizedItems)); }, [minimizedItems]);
   useEffect(() => { localStorage.setItem('ws_events', JSON.stringify(globalEvents)); }, [globalEvents]);
   useEffect(() => { localStorage.setItem('ws_todos', JSON.stringify(globalTodos)); }, [globalTodos]);
+  useEffect(() => { localStorage.setItem('ws_viewType', viewType); }, [viewType]);
 
   // Holiday Fetcher
   useEffect(() => {
@@ -181,7 +224,7 @@ export const Workspace = () => {
     setIsDropping(true);
   };
 
-  const onDrop = (layout: Layout[], layoutItem: Layout, event: Event) => {
+  const onDrop = (_layout: Layout[], layoutItem: Layout, event: Event) => {
     // FIX 1: If dragging a Todo Item, CANCEL module creation
     const dragEvent = event as unknown as React.DragEvent;
     if (dragEvent.dataTransfer && (dragEvent.dataTransfer.types.includes('todoId') || dragEvent.dataTransfer.types.includes('reorderId'))) {
@@ -447,6 +490,334 @@ export const Workspace = () => {
       });
   };
   
+  // --- VIEW TYPE CONVERSION ---
+  const convertToStacked = () => {
+    // Save current free layout before switching
+    localStorage.setItem('ws_items_free', JSON.stringify(items));
+    const freeGroupsArray = Array.from(moduleGroups.entries());
+    localStorage.setItem('ws_groups_free', JSON.stringify(freeGroupsArray));
+    
+    // Check if we have a saved stacked layout
+    const savedStackedLayout = loadState<ModuleItem[]>('ws_items_stacked', []);
+    const savedStackedGroups = loadState<[string, string[]][]>('ws_groups_stacked', []);
+    
+    if (savedStackedLayout.length > 0) {
+      // Restore saved stacked layout
+      setItems(savedStackedLayout);
+      const groupsMap = new Map<string, string[]>();
+      savedStackedGroups.forEach(([groupId, moduleIds]) => groupsMap.set(groupId, moduleIds));
+      setModuleGroups(groupsMap);
+      
+      // Initialize prev layout ref
+      savedStackedLayout.forEach(item => {
+        prevLayoutRef.current.set(item.i, { w: item.w, h: item.h });
+      });
+      
+      setViewType('stacked');
+      return;
+    }
+    
+    // No saved layout, create new stacked layout from current free layout
+    if (items.length === 0) {
+      setViewType('stacked');
+      return;
+    }
+
+    // Analyze current layout: group by type and similar horizontal size
+    const itemsByType = new Map<ModuleType, ModuleItem[]>();
+    items.forEach(item => {
+      if (!itemsByType.has(item.type)) {
+        itemsByType.set(item.type, []);
+      }
+      itemsByType.get(item.type)!.push(item);
+    });
+
+    // Calculate approximate number of rows based on vertical spacing
+    const sortedByY = [...items].sort((a, b) => a.y - b.y);
+    const rowThreshold = ROW_HEIGHT * 2; // Modules within 2 row heights are considered same row
+    const rows: ModuleItem[][] = [];
+    
+    sortedByY.forEach(item => {
+      let placed = false;
+      for (const row of rows) {
+        const avgY = row.reduce((sum, i) => sum + i.y, 0) / row.length;
+        if (Math.abs(item.y - avgY) < rowThreshold) {
+          row.push(item);
+          placed = true;
+          break;
+        }
+      }
+      if (!placed) {
+        rows.push([item]);
+      }
+    });
+
+    // Group modules by type and similar width
+    const groups: { type: ModuleType; items: ModuleItem[]; targetWidth: number }[] = [];
+    const widthTolerance = 4; // Group modules within 4 grid units of width
+
+    itemsByType.forEach((typeItems, type) => {
+      // Sort by width
+      const sortedByWidth = [...typeItems].sort((a, b) => a.w - b.w);
+      
+      sortedByWidth.forEach(item => {
+        let grouped = false;
+        for (const group of groups) {
+          if (group.type === type && Math.abs(item.w - group.targetWidth) <= widthTolerance) {
+            group.items.push(item);
+            grouped = true;
+            break;
+          }
+        }
+        if (!grouped) {
+          groups.push({ type, items: [item], targetWidth: item.w });
+        }
+      });
+    });
+
+    // Standardize widths within groups
+    groups.forEach(group => {
+      const avgWidth = Math.round(group.items.reduce((sum, i) => sum + i.w, 0) / group.items.length);
+      group.targetWidth = avgWidth;
+      group.items.forEach(item => {
+        item.w = avgWidth;
+      });
+    });
+
+    // Create new layout: place groups in rows, compacting space
+    const newItems: ModuleItem[] = [];
+    const groupsMap = new Map<string, string[]>();
+    let currentY = 0;
+    let currentX = 0;
+    const maxWidth = COLS;
+    const rowSpacing = 1; // 1 row between groups
+
+    // Sort groups by type for better organization
+    groups.sort((a, b) => {
+      if (a.type !== b.type) return a.type.localeCompare(b.type);
+      return a.targetWidth - b.targetWidth;
+    });
+
+    groups.forEach((group, groupIdx) => {
+      const groupId = `group-${group.type}-${groupIdx}`;
+      const groupModuleIds: string[] = [];
+
+      // Check if current row has space, otherwise move to next row
+      const groupWidth = group.items.reduce((sum, item) => sum + item.w, 0) + (group.items.length - 1); // Add spacing between items
+      if (currentX > 0 && currentX + groupWidth > maxWidth) {
+        currentX = 0;
+        const maxHeightInRow = Math.max(...newItems.filter(i => i.y === currentY).map(i => i.h), 0);
+        currentY += maxHeightInRow + rowSpacing;
+      }
+
+      // Place items in group horizontally
+      group.items.forEach((item) => {
+        const newItem: ModuleItem = {
+          ...item,
+          x: currentX,
+          y: currentY,
+          w: group.targetWidth,
+          groupId,
+          rowIndex: currentY
+        };
+        newItems.push(newItem);
+        groupModuleIds.push(item.i);
+        currentX += item.w + 1; // 1 grid unit spacing
+      });
+
+      groupsMap.set(groupId, groupModuleIds);
+      
+      // Move to next row after group if needed, or continue on same row
+      if (groupIdx < groups.length - 1) {
+        const nextGroup = groups[groupIdx + 1];
+        const nextGroupWidth = nextGroup.items.reduce((sum, item) => sum + item.w, 0) + (nextGroup.items.length - 1);
+        if (currentX + nextGroupWidth > maxWidth) {
+          const maxHeightInRow = Math.max(...group.items.map(i => i.h), 0);
+          currentX = 0;
+          currentY += maxHeightInRow + rowSpacing;
+        }
+      }
+    });
+
+    setItems(newItems);
+    setModuleGroups(groupsMap);
+    
+    // Save the new stacked layout
+    localStorage.setItem('ws_items_stacked', JSON.stringify(newItems));
+    const groupsArray = Array.from(groupsMap.entries());
+    localStorage.setItem('ws_groups_stacked', JSON.stringify(groupsArray));
+    
+    setViewType('stacked');
+    
+    // Initialize prev layout ref
+    newItems.forEach(item => {
+      prevLayoutRef.current.set(item.i, { w: item.w, h: item.h });
+    });
+  };
+
+  const convertToFree = () => {
+    // Save current stacked layout before switching
+    localStorage.setItem('ws_items_stacked', JSON.stringify(items));
+    const stackedGroupsArray = Array.from(moduleGroups.entries());
+    localStorage.setItem('ws_groups_stacked', JSON.stringify(stackedGroupsArray));
+    
+    // Load saved free layout
+    const savedFreeLayout = loadState<ModuleItem[]>('ws_items_free', []);
+    
+    if (savedFreeLayout.length > 0) {
+      // Restore saved free layout
+      setItems(savedFreeLayout);
+      setModuleGroups(new Map());
+      
+      // Initialize prev layout ref
+      savedFreeLayout.forEach(item => {
+        prevLayoutRef.current.set(item.i, { w: item.w, h: item.h });
+      });
+    } else {
+      // No saved layout, remove group metadata but keep positions
+      const freeItems = items.map(item => {
+        const { groupId, rowIndex, ...rest } = item;
+        return rest;
+      });
+      setItems(freeItems);
+      setModuleGroups(new Map());
+      
+      // Initialize prev layout ref
+      freeItems.forEach(item => {
+        prevLayoutRef.current.set(item.i, { w: item.w, h: item.h });
+      });
+    }
+    
+    setViewType('free');
+  };
+
+  const toggleViewType = () => {
+    if (viewType === 'free') {
+      convertToStacked();
+    } else {
+      convertToFree();
+    }
+  };
+
+  const compactStackedLayout = (itemsToCompact: ModuleItem[]): ModuleItem[] => {
+    // Group items by row (y position) - use rowIndex if available, otherwise y
+    const rows = new Map<number, ModuleItem[]>();
+    itemsToCompact.forEach(item => {
+      const rowY = item.rowIndex !== undefined ? item.rowIndex : Math.round(item.y);
+      if (!rows.has(rowY)) rows.set(rowY, []);
+      rows.get(rowY)!.push(item);
+    });
+    
+    // Sort rows by y
+    const sortedRows = Array.from(rows.entries()).sort((a, b) => a[0] - b[0]);
+    
+    // Compact: place items next to each other in each row
+    let currentY = 0;
+    const compacted: ModuleItem[] = [];
+    
+    sortedRows.forEach(([, rowItems]) => {
+      // Sort items in row by x
+      rowItems.sort((a, b) => a.x - b.x);
+      
+      let currentX = 0;
+      const maxHeight = Math.max(...rowItems.map(i => i.h));
+      
+      rowItems.forEach(item => {
+        compacted.push({
+          ...item,
+          x: currentX,
+          y: currentY,
+          rowIndex: currentY
+        });
+        currentX += item.w + 1; // 1 unit spacing
+      });
+      
+      currentY += maxHeight + 1; // 1 unit spacing between rows
+    });
+    
+    return compacted;
+  };
+
+  const handleLayoutChange = (newLayout: Layout[]) => {
+    if (isDropping) return;
+    
+    if (viewType === 'stacked') {
+      // In stacked mode, handle group resizing and row movement
+      setItems(prevItems => {
+        // Track which groups are being resized
+        const groupsBeingResized = new Map<string, { widthDiff: number; heightDiff: number }>();
+        
+        // First pass: detect resizes and row moves
+        const updated = prevItems.map(item => {
+          const match = newLayout.find(l => l.i === item.i);
+          if (!match) return item;
+          
+          const prevSize = prevLayoutRef.current.get(item.i) || { w: item.w, h: item.h };
+          const widthDiff = match.w - prevSize.w;
+          const heightDiff = match.h - prevSize.h;
+          const isResize = Math.abs(widthDiff) > 0.5 || Math.abs(heightDiff) > 0.5;
+          const isRowMove = Math.abs(match.y - item.y) > 2;
+          
+          // If item has a group and is being resized, track it
+          if (item.groupId && isResize && !isRowMove) {
+            if (!groupsBeingResized.has(item.groupId)) {
+              groupsBeingResized.set(item.groupId, { widthDiff, heightDiff });
+            }
+          }
+          
+          // Update item position/size
+          return {
+            ...item,
+            x: match.x,
+            y: match.y,
+            w: match.w,
+            h: match.h,
+            rowIndex: isRowMove ? Math.round(match.y) : item.rowIndex
+          };
+        });
+        
+        // Second pass: apply group resizing
+        let finalUpdated = [...updated];
+        groupsBeingResized.forEach(({ widthDiff, heightDiff }, groupId) => {
+          const groupItems = moduleGroups.get(groupId) || [];
+          finalUpdated = finalUpdated.map(i => {
+            if (groupItems.includes(i.i)) {
+              const newW = Math.max(MODULE_SPECS[i.type].minW, i.w + widthDiff);
+              const newH = Math.max(MODULE_SPECS[i.type].minH, i.h + heightDiff);
+              return {
+                ...i,
+                w: newW,
+                h: newH
+              };
+            }
+            return i;
+          });
+        });
+        
+        // Update prev layout ref
+        newLayout.forEach(l => {
+          prevLayoutRef.current.set(l.i, { w: l.w, h: l.h });
+        });
+        
+        // Re-compact after changes
+        return compactStackedLayout(finalUpdated);
+      });
+    } else {
+      // Free mode: normal behavior
+      setItems(prevItems => {
+        const updated = prevItems.map(item => {
+          const match = newLayout.find(l => l.i === item.i);
+          if (match) {
+            prevLayoutRef.current.set(item.i, { w: match.w, h: match.h });
+            return { ...item, x: match.x, y: match.y, w: match.w, h: match.h };
+          }
+          return item;
+        });
+        return updated;
+      });
+    }
+  };
+
   const getVisibleTodos = (module: ModuleItem) => globalTodos.filter(t => t.originModuleId === module.i);
   const currentSpecs = MODULE_SPECS[draggingType];
   const hasClock = items.some(i => i.type === 'clock');
@@ -455,14 +826,35 @@ export const Workspace = () => {
     <div className="app-container" style={{ position: 'relative', height: '100vh', display: 'flex', flexDirection: 'column' }}>
       
       {/* TOOLBAR */}
-      <div className="toolbar" style={{ height: TOOLBAR_HEIGHT, flexShrink: 0 }}>
+      <div className="toolbar" style={{ height: TOOLBAR_HEIGHT, flexShrink: 0, display: 'flex', alignItems: 'center', gap: '10px', padding: '0 10px' }}>
+        {/* View Type Toggle */}
+        <div 
+          onClick={toggleViewType}
+          style={{ 
+            display: 'flex', 
+            flexDirection: 'column', 
+            alignItems: 'center', 
+            cursor: 'pointer', 
+            padding: '5px', 
+            border: '2px solid #007bff', 
+            borderRadius: '5px', 
+            width: '60px',
+            background: viewType === 'stacked' ? '#007bff' : 'white',
+            color: viewType === 'stacked' ? 'white' : '#007bff'
+          }}
+          title={viewType === 'free' ? 'Switch to Stacked View' : 'Switch to Free View'}
+        >
+          {viewType === 'free' ? <FaTh size={20} /> : <FaBars size={20} />}
+          <span style={{fontSize: '9px', marginTop: '4px'}}>{viewType === 'free' ? 'Free' : 'Stacked'}</span>
+        </div>
+
         {([
-            { type: 'notepad', label: 'Notepad', Icon: FaRegStickyNote, color: '#007bff' },
-            { type: 'stickynote', label: 'Sticky', Icon: FaRegStickyNote, color: '#fdd835' },
-            { type: 'whiteboard', label: 'Whiteboard', Icon: FaPencilAlt, color: '#6610f2' },
-            { type: 'todo', label: 'To-Do', Icon: FaCheckSquare, color: '#e83e8c' },
-            { type: 'calendar', label: 'Calendar', Icon: FaCalendarAlt, color: '#fd7e14' },
-            { type: 'events', label: 'Events', Icon: FaList, color: '#17a2b8' },
+            { type: 'notepad', label: 'Notepad', Icon: FaRegStickyNote, color: '#007bff', disabled: false },
+            { type: 'stickynote', label: 'Sticky', Icon: FaRegStickyNote, color: '#fdd835', disabled: false },
+            { type: 'whiteboard', label: 'Whiteboard', Icon: FaPencilAlt, color: '#6610f2', disabled: false },
+            { type: 'todo', label: 'To-Do', Icon: FaCheckSquare, color: '#e83e8c', disabled: false },
+            { type: 'calendar', label: 'Calendar', Icon: FaCalendarAlt, color: '#fd7e14', disabled: false },
+            { type: 'events', label: 'Events', Icon: FaList, color: '#17a2b8', disabled: false },
             { type: 'clock', label: 'Clock', Icon: FaRegClock, color: '#28a745', disabled: hasClock },
         ] as const).map(tool => (
              <div key={tool.type} className="droppable-element" draggable={!tool.disabled} unselectable="on" onDragStart={(e) => !tool.disabled && onDragStart(e, tool.type as ModuleType)} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', cursor: tool.disabled ? 'not-allowed' : 'grab', opacity: tool.disabled ? 0.3 : 1, padding: '5px', border: '1px solid #ccc', borderRadius: '5px', width: '60px' }}>
@@ -520,7 +912,39 @@ export const Workspace = () => {
 
       {/* GRID */}
       <div style={{ flex: 1, overflow: 'hidden', position: 'relative', zIndex: 1 }}> 
-        <ReactGridLayout className="layout" layout={items.map(i => { const spec = MODULE_SPECS[i.type]; return { i: i.i, x: i.x, y: i.y, w: i.w, h: i.h, minW: spec.minW, minH: spec.minH }; })} cols={COLS} rowHeight={ROW_HEIGHT} width={1200} margin={[0, 0]} style={{ height: gridHeight + 'px' }} isDroppable={true} onDrop={onDrop} isBounded={true} maxRows={maxRows} compactType={null} preventCollision={true} onLayoutChange={(newLayout) => { if (isDropping) return; setItems(prevItems => prevItems.map(item => { const match = newLayout.find(l => l.i === item.i); return match ? { ...item, x: match.x, y: match.y, w: match.w, h: match.h } : item; })); }} droppingItem={{ i: 'placeholder', w: currentSpecs.w, h: currentSpecs.h }} draggableHandle=".drag-handle">
+        <ReactGridLayout 
+          className="layout" 
+          layout={items.map(i => { 
+            const spec = MODULE_SPECS[i.type]; 
+            return { 
+              i: i.i, 
+              x: i.x, 
+              y: i.y, 
+              w: i.w, 
+              h: i.h, 
+              minW: spec.minW, 
+              minH: spec.minH,
+              maxW: viewType === 'stacked' && i.groupId ? undefined : spec.maxW,
+              maxH: viewType === 'stacked' && i.groupId ? undefined : spec.maxH
+            }; 
+          })} 
+          cols={COLS} 
+          rowHeight={ROW_HEIGHT} 
+          width={1200} 
+          margin={[0, 0]} 
+          style={{ height: gridHeight + 'px' }} 
+          isDroppable={viewType === 'free'} 
+          onDrop={onDrop} 
+          isBounded={true} 
+          maxRows={maxRows} 
+          compactType={viewType === 'stacked' ? null : null} 
+          preventCollision={viewType === 'stacked'} 
+          onLayoutChange={handleLayoutChange}
+          isDraggable={true}
+          isResizable={true}
+          droppingItem={viewType === 'free' ? { i: 'placeholder', w: currentSpecs.w, h: currentSpecs.h } : undefined} 
+          draggableHandle=".drag-handle"
+        >
           {items.map((item) => {
              const theme = THEMES[item.themeIndex || 0] || THEMES[0];
              return (
