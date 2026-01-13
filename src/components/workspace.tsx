@@ -9,8 +9,9 @@ import { Calendar } from './modules/calendar';
 import { TodoList } from './modules/todolist';
 import { EventsList } from './modules/eventslist';
 import type { CalendarEvent, TodoItem } from '../types';
-import { StickyNote } from './modules/stickynote'; 
-import { FaRegStickyNote, FaRegClock, FaPencilAlt, FaCalendarAlt, FaCheckSquare, FaList, FaTrash, FaPalette, FaExclamationTriangle, FaMinus, FaTh, FaBars } from 'react-icons/fa';
+import { StickyNote } from './modules/stickynote';
+import { Counter } from './modules/counter';
+import { FaRegStickyNote, FaRegClock, FaPencilAlt, FaCalendarAlt, FaCheckSquare, FaList, FaTrash, FaPalette, FaExclamationTriangle, FaMinus, FaTh, FaBars, FaCalculator } from 'react-icons/fa';
 
 const ReactGridLayout = WidthProvider(RGL);
 
@@ -27,7 +28,8 @@ const MODULE_SPECS = {
     calendar:   { w: 12, h: 12, minW: 12, minH: 12, maxW: undefined, maxH: undefined }, 
     todo:       { w: 12, h: 8, minW: 12, minH: 8, maxW: undefined, maxH: undefined },
     stickynote: { w: 8, h: 8, minW: 8, minH: 8, maxW: 8, maxH: 8 }, 
-    events:     { w: 14, h: 14, minW: 10, minH: 10, maxW: undefined, maxH: undefined }
+    events:     { w: 14, h: 14, minW: 10, minH: 10, maxW: undefined, maxH: undefined },
+    counter:    { w: 10, h: 10, minW: 8, minH: 8, maxW: undefined, maxH: undefined }
 };
 
 // 16 Themes (Header Color, Body Color)
@@ -50,7 +52,7 @@ const THEMES = [
     { name: 'Orange', header: 'rgba(255, 224, 178, 0.9)', body: 'rgba(255, 243, 224, 0.85)' },
 ];
 
-type ModuleType = 'notepad' | 'clock' | 'whiteboard' | 'calendar' | 'todo' | 'stickynote' | 'events';
+type ModuleType = 'notepad' | 'clock' | 'whiteboard' | 'calendar' | 'todo' | 'stickynote' | 'events' | 'counter';
 
 interface ModuleItem {
   i: string;
@@ -65,6 +67,12 @@ interface ModuleItem {
   clockMode?: 'analog' | 'digital' | 'timer';
   linkedCategory?: string; 
   themeIndex?: number;
+  // Counter support
+  counterName?: string;
+  counterType?: 'time' | 'count';
+  counterGoal?: number;
+  counterValue?: number;
+  counterIsTimeSet?: boolean;
   // Minimization support
   prevPos?: { x: number, y: number, w: number, h: number };
   // Stacked mode support
@@ -88,7 +96,8 @@ const MODULE_ICONS = {
     calendar: FaCalendarAlt,
     todo: FaCheckSquare,
     stickynote: FaRegStickyNote,
-    events: FaList
+    events: FaList,
+    counter: FaCalculator
 };
 
 export const Workspace = () => {
@@ -263,7 +272,8 @@ export const Workspace = () => {
 
     const newItem: ModuleItem = {
         i: uniqueId, x: layoutItem.x, y: layoutItem.y, w: specs.w, h: specs.h, type: draggingType,
-        title: defaultTitle, content: '', clockMode: 'analog', listTitle: '', themeIndex: 0
+        title: defaultTitle, content: '', clockMode: 'analog', listTitle: '', themeIndex: 0,
+        counterName: undefined, counterType: undefined, counterGoal: undefined, counterValue: undefined, counterIsTimeSet: false
     };
     setItems(prev => [...prev, newItem]);
     setIsDropping(false);
@@ -307,6 +317,7 @@ export const Workspace = () => {
       if (item.type === 'notepad' || item.type === 'stickynote') if (item.content && item.content.trim().length > 0) hasContent = true;
       else if (item.type === 'whiteboard') if (item.content && item.content.length > 50) hasContent = true; 
       else if (item.type === 'todo') if (globalTodos.some(t => t.originModuleId === id)) hasContent = true;
+      else if (item.type === 'counter') if (item.counterName && item.counterType) hasContent = true;
 
       if (hasContent) setDeleteConfirmId(id);
       else performDelete(id);
@@ -856,6 +867,7 @@ export const Workspace = () => {
             { type: 'calendar', label: 'Calendar', Icon: FaCalendarAlt, color: '#fd7e14', disabled: false },
             { type: 'events', label: 'Events', Icon: FaList, color: '#17a2b8', disabled: false },
             { type: 'clock', label: 'Clock', Icon: FaRegClock, color: '#28a745', disabled: hasClock },
+            { type: 'counter', label: 'Counter', Icon: FaCalculator, color: '#20c997', disabled: false },
         ] as const).map(tool => (
              <div key={tool.type} className="droppable-element" draggable={!tool.disabled} unselectable="on" onDragStart={(e) => !tool.disabled && onDragStart(e, tool.type as ModuleType)} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', cursor: tool.disabled ? 'not-allowed' : 'grab', opacity: tool.disabled ? 0.3 : 1, padding: '5px', border: '1px solid #ccc', borderRadius: '5px', width: '60px' }}>
                 <tool.Icon size={20} color={tool.disabled ? '#999' : tool.color}/>
@@ -1067,6 +1079,22 @@ export const Workspace = () => {
                 {item.type === 'stickynote' && <StickyNote content={item.content || ''} onChange={(txt) => updateContent(item.i, { content: txt })} />}
                 {item.type === 'events' && <EventsList events={allEvents} onAddClick={() => openAddEventModal()} onToggleNotify={(id) => setGlobalEvents(prev => prev.map(e => e.id === id ? { ...e, notify: !e.notify } : e))} />}
                 {item.type === 'calendar' && <Calendar events={allEvents} onDayClick={(date) => openAddEventModal(date)} />}
+                {item.type === 'counter' && (
+                    <Counter
+                        name={item.counterName}
+                        type={item.counterType}
+                        goal={item.counterGoal}
+                        currentValue={item.counterValue}
+                        isTimeSet={item.counterIsTimeSet}
+                        onUpdate={(data) => updateContent(item.i, {
+                            counterName: data.name !== undefined ? data.name : item.counterName,
+                            counterType: data.type !== undefined ? data.type : item.counterType,
+                            counterGoal: data.goal !== undefined ? data.goal : item.counterGoal,
+                            counterValue: data.currentValue !== undefined ? data.currentValue : item.counterValue,
+                            counterIsTimeSet: data.isTimeSet !== undefined ? data.isTimeSet : item.counterIsTimeSet
+                        })}
+                    />
+                )}
               </div>
             </div>
           );
