@@ -17,8 +17,6 @@ export interface TodoItem {
   done: boolean;
   description?: string;
   color?: string; 
-  category?: string; 
   originModuleId: string; 
-  linkedEventId?: string;
   parentId?: string;
 }

@@ -96,7 +96,6 @@ export const Workspace = () => {
   const [minimizedItems, setMinimizedItems] = useState<ModuleItem[]>(() => loadState('ws_minimized', []));
   const [globalEvents, setGlobalEvents] = useState<CalendarEvent[]>(() => loadState('ws_events', []));
   const [globalTodos, setGlobalTodos] = useState<TodoItem[]>(() => loadState('ws_todos', []));
-  const [todoCategories, setTodoCategories] = useState<string[]>(() => loadState('ws_categories', []));
   const [holidayEvents, setHolidayEvents] = useState<CalendarEvent[]>([]);
 
   useEffect(() => { localStorage.setItem('ws_items', JSON.stringify(items)); }, [items]);
@@ -123,33 +122,6 @@ export const Workspace = () => {
                                   .sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime())
                                   .slice(0, 15);
 
-  // --- AUTO-CHECK TODOs ---
-  useEffect(() => {
-      const interval = setInterval(() => {
-          const now = new Date();
-          let hasUpdates = false;
-          const updatedTodos = globalTodos.map(todo => {
-              if (todo.linkedEventId && !todo.done) {
-                  const evt = allEvents.find(e => e.id === todo.linkedEventId);
-                  if (evt) {
-                      const evtDate = new Date(evt.date);
-                      if (evt.startTime) {
-                          const [h, m] = evt.startTime.split(':');
-                          evtDate.setHours(Number(h), Number(m));
-                      }
-                      if (evtDate < now) {
-                          hasUpdates = true;
-                          return { ...todo, done: true };
-                      }
-                  }
-              }
-              return todo;
-          });
-          if (hasUpdates) setGlobalTodos(updatedTodos);
-      }, 60000); 
-      return () => clearInterval(interval);
-  }, [globalTodos, allEvents]);
-
   // UI State
   const [draggingType, setDraggingType] = useState<ModuleType>('notepad');
   const [isDropping, setIsDropping] = useState(false);
@@ -161,7 +133,6 @@ export const Workspace = () => {
   const [showModal, setShowModal] = useState(false);
   const [modalData, setModalData] = useState<Partial<CalendarEvent>>({});
   const [editingTodo, setEditingTodo] = useState<TodoItem | null>(null);
-  const [newCatText, setNewCatText] = useState('');
   const [editingTitleId, setEditingTitleId] = useState<string | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [paletteOpenId, setPaletteOpenId] = useState<string | null>(null);
@@ -338,7 +309,6 @@ export const Workspace = () => {
           originModuleId: moduleId, 
           parentId,
           color: parent?.color || '#333333',
-          category: parent?.category,
       }]);
   };
 
@@ -394,9 +364,6 @@ export const Workspace = () => {
           return prev.filter(t => !toDelete.includes(t.id));
       });
   };
-
-  const addCategory = (cat: string) => { if (cat && !todoCategories.includes(cat)) setTodoCategories([...todoCategories, cat]); };
-  const removeCategory = (cat: string) => setTodoCategories(prev => prev.filter(c => c !== cat));
   
   const moveTodo = (itemId: string, targetModuleId: string) => {
       // Recursive move
@@ -478,9 +445,7 @@ export const Workspace = () => {
             </div>
         ))}
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '5px' }}>
-            <button onClick={() => setShowDebug(!showDebug)} style={{ border: '1px solid #ccc', background: showDebug ? '#ffeeba' : 'white', padding: '5px 10px', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                <FaBug /> {showDebug ? 'Debug ON' : 'Debug OFF'}
-            </button>
+            
         </div>
       </div>
 
@@ -524,29 +489,8 @@ export const Workspace = () => {
                 
                 <div className="modal-row" style={{ flexDirection: 'row', gap: '10px' }}>
                     <div style={{flex: 1}}><label><FaPalette /> Color:</label><input type="color" value={editingTodo.color || '#333333'} onChange={(e) => { const val = e.target.value; setEditingTodo({...editingTodo, color: val}); updateTodo(editingTodo.id, { color: val }); }} /></div>
-                    <div style={{flex: 1}}><label><FaTag /> Category:</label><select value={editingTodo.category || ''} onChange={(e) => { const val = e.target.value || undefined; setEditingTodo({...editingTodo, category: val}); updateTodo(editingTodo.id, { category: val }); }}><option value="">(None)</option>{todoCategories.map(cat => (<option key={cat} value={cat}>{cat}</option>))}</select></div>
                 </div>
 
-                <div className="modal-row" style={{borderTop: '1px solid #eee', paddingTop: '10px'}}>
-                    <label><FaLink /> Link to Event:</label>
-                    <select 
-                        value={editingTodo.linkedEventId || ''} 
-                        onChange={(e) => {
-                            const val = e.target.value || undefined;
-                            setEditingTodo({...editingTodo, linkedEventId: val});
-                            updateTodo(editingTodo.id, { linkedEventId: val });
-                        }}
-                    >
-                        <option value="">(No Link)</option>
-                        {upcomingEvents.map(e => (
-                            <option key={e.id} value={e.id}>
-                                {new Date(e.date).toLocaleDateString()} - {e.title}
-                            </option>
-                        ))}
-                    </select>
-                </div>
-
-                <div className="modal-row" style={{borderTop: '1px solid #eee', paddingTop: '10px', marginTop: '5px'}}><label style={{fontSize:'11px'}}>Manage Categories:</label><div style={{display:'flex', gap:'5px'}}><input type="text" placeholder="New category..." value={newCatText} onChange={(e) => setNewCatText(e.target.value)} style={{flex:1}} /><button onClick={() => { if(newCatText) { addCategory(newCatText); setNewCatText(''); } }} style={{background:'#28a745', color:'white', border:'none', borderRadius:'4px', padding:'0 10px'}}><FaPlus /></button></div><div style={{display:'flex', flexWrap:'wrap', gap:'5px', marginTop:'5px'}}>{todoCategories.map(cat => (<span key={cat} className="category-tag" style={{background:'#eee', padding:'2px 5px', display:'flex', alignItems:'center', gap:'5px'}}>{cat}<button onClick={() => removeCategory(cat)} style={{border:'none', background:'transparent', color:'#999', cursor:'pointer', padding:0, fontSize:'10px'}}>✕</button></span>))}</div></div>
                 <div className="modal-actions"><button onClick={() => setEditingTodo(null)} style={{background: '#007bff', color: 'white', border: 'none', padding: '8px 15px', borderRadius: '4px'}}>Done</button></div>
             </div>
         </div>
