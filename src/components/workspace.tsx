@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import RGL, { WidthProvider, Layout } from 'react-grid-layout';
 import Holidays from 'date-holidays';
-import _ from 'lodash';
 import { Notepad } from './modules/notepad';
 import { Clock } from './modules/clock';
 import { Whiteboard } from './modules/whiteboard';
@@ -9,9 +8,10 @@ import { Calendar } from './modules/calendar';
 import { TodoList } from './modules/todolist';
 import { EventsList } from './modules/eventslist';
 import { Planner } from './modules/planner';
+import { Counter } from './modules/counter';
 import type { CalendarEvent, TodoItem } from '../types';
 import { StickyNote } from './modules/stickynote'; 
-import { FaRegStickyNote, FaRegClock, FaPencilAlt, FaCalendarAlt, FaCheckSquare, FaBug, FaList, FaTrash, FaPalette, FaTag, FaPlus, FaExclamationTriangle, FaLink, FaMinus, FaWindowMaximize, FaTasks } from 'react-icons/fa';
+import { FaRegStickyNote, FaRegClock, FaPencilAlt, FaCalendarAlt, FaCheckSquare, FaList, FaTrash, FaPalette, FaExclamationTriangle, FaMinus, FaTasks, FaStopwatch } from 'react-icons/fa';
 
 const ReactGridLayout = WidthProvider(RGL);
 
@@ -29,7 +29,8 @@ const MODULE_SPECS = {
     todo:       { w: 12, h: 8, minW: 12, minH: 8 },
     stickynote: { w: 8, h: 8, minW: 8, minH: 8, maxW: 8, maxH: 8 }, 
     events:     { w: 14, h: 14, minW: 10, minH: 10 },
-    planner:    { w: 16, h: 12, minW: 12, minH: 10 }
+    planner:    { w: 16, h: 12, minW: 12, minH: 10 },
+    counter:    { w: 12, h: 10, minW: 10, minH: 10 }
 };
 
 // 16 Themes (Header Color, Body Color)
@@ -52,7 +53,7 @@ const THEMES = [
     { name: 'Orange', header: 'rgba(255, 224, 178, 0.9)', body: 'rgba(255, 243, 224, 0.85)' },
 ];
 
-type ModuleType = 'notepad' | 'clock' | 'whiteboard' | 'calendar' | 'todo' | 'stickynote' | 'events' | 'planner';
+type ModuleType = 'notepad' | 'clock' | 'whiteboard' | 'calendar' | 'todo' | 'stickynote' | 'events' | 'planner' | 'counter';
 
 interface ModuleItem {
   i: string;
@@ -69,6 +70,12 @@ interface ModuleItem {
   themeIndex?: number;
   // Minimization support
   prevPos?: { x: number, y: number, w: number, h: number }; 
+  // Counter-specific fields
+  name?: string;
+  counterType?: 'time' | 'count';
+  goal?: number;
+  currentValue?: number;
+  isTimeSet?: boolean;
 }
 
 const loadState = <T,>(key: string, defaultVal: T): T => {
@@ -88,7 +95,8 @@ const MODULE_ICONS = {
     todo: FaCheckSquare,
     stickynote: FaRegStickyNote,
     events: FaList,
-    planner: FaTasks
+    planner: FaTasks,
+    counter: FaStopwatch
 };
 
 export const Workspace = () => {
@@ -109,8 +117,13 @@ export const Workspace = () => {
       const countryCode = locale.split('-')[1] || 'US';
       const hd = new Holidays(countryCode);
       const currentYear = new Date().getFullYear();
-      let fetched: any[] = [];
+      type Holiday = {
+        name: string;
+        date: string;
+      }
+      let fetched: Holiday[] = [];
       [currentYear - 1, currentYear, currentYear + 1].forEach(y => { fetched = [...fetched, ...hd.getHolidays(y)]; });
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setHolidayEvents(fetched.map((h, i) => ({
           id: `holiday-${i}`, title: h.name, date: new Date(h.date).toISOString(),
           isAllDay: true, notify: false, color: '#28a745', category: 'Public Holiday', location: countryCode
@@ -118,16 +131,12 @@ export const Workspace = () => {
   }, []);
 
   const allEvents = [...holidayEvents, ...globalEvents];
-  const upcomingEvents = allEvents.filter(e => new Date(e.date) >= new Date(new Date().setHours(0,0,0,0)))
-                                  .sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime())
-                                  .slice(0, 15);
 
   // UI State
   const [draggingType, setDraggingType] = useState<ModuleType>('notepad');
   const [isDropping, setIsDropping] = useState(false);
   const [gridHeight, setGridHeight] = useState(800);
   const [maxRows, setMaxRows] = useState(50);
-  const [showDebug, setShowDebug] = useState(false);
   
   // Modals
   const [showModal, setShowModal] = useState(false);
@@ -202,6 +211,7 @@ export const Workspace = () => {
     let defaultTitle = draggingType.charAt(0).toUpperCase() + draggingType.slice(1);
     if (draggingType === 'todo') defaultTitle = "To-do (click to edit)";
     if (draggingType === 'planner') defaultTitle = "Planner";
+    if (draggingType === 'counter') defaultTitle = "New Counter";
 
     const newItem: ModuleItem = {
         i: uniqueId, x: layoutItem.x, y: layoutItem.y, w: specs.w, h: specs.h, type: draggingType,
@@ -246,28 +256,10 @@ export const Workspace = () => {
       const item = items.find(i => i.i === id);
       if (!item) return;
       let hasContent = false;
-      if (item.type === 'notepad' || item.type === 'stickynote') {
-        if (item.content && item.content.trim().length > 0) hasContent = true;
-      }
-      else if (item.type === 'whiteboard') {
-        if (item.content && item.content.trim().length > 0) hasContent = true; 
-      }
-      else if (item.type === 'todo') {
-        if (globalTodos.some(t => t.originModuleId === id)) hasContent = true;
-      }
-      else if (item.type === 'planner') {
-        if (item.content) {
-            try {
-                const plannerData = JSON.parse(item.content);
-                if (plannerData.defs?.length > 0 || plannerData.plan?.length > 0) {
-                    hasContent = true;
-                }
-            } catch (e) {
-                // Failsafe in case of malformed content
-                if (item.content.length > 25) hasContent = true;
-            }
-        }
-      }
+      if (item.type === 'notepad' || item.type === 'stickynote') if (item.content && item.content.trim().length > 0) hasContent = true;
+      else if (item.type === 'whiteboard') if (item.content && item.content.length > 50) hasContent = true; 
+      else if (item.type === 'todo') if (globalTodos.some(t => t.originModuleId === id)) hasContent = true;
+      else if (item.type === 'planner') if (item.content && item.content.length > 50) hasContent = true;
 
       if (hasContent) setDeleteConfirmId(id);
       else performDelete(id);
@@ -279,7 +271,13 @@ export const Workspace = () => {
       setDeleteConfirmId(null);
   };
 
-  const updateContent = (id: string, data: Partial<ModuleItem>) => setItems(prev => prev.map(i => i.i === id ? { ...i, ...data } : i));
+  const updateContent = (id: string, data: Partial<ModuleItem>) => {
+    setItems(prev => prev.map(i => i.i === id ? { ...i, ...data } : i));
+    // When updating counter, if a name is provided, update the module title too
+    if (data.name) {
+        setItems(prev => prev.map(i => i.i === id ? { ...i, title: data.name } : i));
+    }
+  };
   
   // --- EVENT HANDLING ---
   const openAddEventModal = (date?: Date) => { 
@@ -334,7 +332,7 @@ export const Workspace = () => {
       if ('done' in updates) {
           const newStatus = updates.done!;
           setGlobalTodos(prev => {
-              let nextTodos = [...prev];
+              const nextTodos = [...prev];
               const updateItem = (itemId: string, patch: Partial<TodoItem>) => {
                   const idx = nextTodos.findIndex(t => t.id === itemId);
                   if (idx !== -1) nextTodos[idx] = { ...nextTodos[idx], ...patch };
@@ -413,10 +411,10 @@ export const Workspace = () => {
           const draggedItem = prev.find(t => t.id === draggedId);
           if (!draggedItem) return prev;
 
-          let newTodos = prev.filter(t => t.id !== draggedId); // Remove temporarily
+          const newTodos = prev.filter(t => t.id !== draggedId); // Remove temporarily
           const targetIndex = newTodos.findIndex(t => t.id === targetId);
 
-          let updatedItem = { ...draggedItem, originModuleId: moduleId };
+          const updatedItem = { ...draggedItem, originModuleId: moduleId };
           
           if (targetId && targetIndex !== -1) {
               const targetItem = prev.find(t => t.id === targetId)!;
@@ -427,7 +425,7 @@ export const Workspace = () => {
                   updatedItem.parentId = targetItem.parentId; 
               }
               
-              let insertIndex = position === 'after' ? targetIndex + 1 : targetIndex;
+              const insertIndex = position === 'after' ? targetIndex + 1 : targetIndex;
               newTodos.splice(insertIndex, 0, updatedItem);
           } else {
               updatedItem.parentId = undefined;
@@ -453,6 +451,7 @@ export const Workspace = () => {
             { type: 'whiteboard', label: 'Whiteboard', Icon: FaPencilAlt, color: '#6610f2' },
             { type: 'todo', label: 'To-Do', Icon: FaCheckSquare, color: '#e83e8c' },
             { type: 'planner', label: 'Planner', Icon: FaTasks, color: '#20c997' },
+            { type: 'counter', label: 'Counter', Icon: FaStopwatch, color: '#6f42c1' },
             { type: 'calendar', label: 'Calendar', Icon: FaCalendarAlt, color: '#fd7e14' },
             { type: 'events', label: 'Events', Icon: FaList, color: '#17a2b8' },
             { type: 'clock', label: 'Clock', Icon: FaRegClock, color: '#28a745', disabled: hasClock },
@@ -622,6 +621,16 @@ export const Workspace = () => {
                 {item.type === 'events' && <EventsList events={allEvents} onAddClick={() => openAddEventModal()} onToggleNotify={(id) => setGlobalEvents(prev => prev.map(e => e.id === id ? { ...e, notify: !e.notify } : e))} />}
                 {item.type === 'calendar' && <Calendar events={allEvents} onDayClick={(date) => openAddEventModal(date)} />}
                 {item.type === 'planner' && <Planner content={item.content || ''} onChange={(data) => updateContent(item.i, { content: data })} bgColor={theme.body} />}
+                {item.type === 'counter' && (
+                    <Counter 
+                        name={item.name}
+                        type={item.counterType}
+                        goal={item.goal}
+                        currentValue={item.currentValue}
+                        isTimeSet={item.isTimeSet}
+                        onUpdate={(data) => updateContent(item.i, { ...data, counterType: data.type, title: data.name || item.title })}
+                    />
+                )}
               </div>
             </div>
           );

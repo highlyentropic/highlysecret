@@ -24,7 +24,7 @@ export const Whiteboard: React.FC<WhiteboardProps> = ({ content, onChange }) => 
               isLoaded.current = true;
           };
       }
-  }, []); // Run once on mount (or when content becomes available initially)
+  }, [content]); // Run once on mount (or when content becomes available initially)
 
   // Handle Resize: Expand canvas without scaling/stretching image
   useEffect(() => {
