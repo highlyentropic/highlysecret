@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { FaChevronLeft, FaChevronRight, FaCalendarDay, FaCalendarWeek, FaCalendarAlt, FaCaretDown, FaSearchPlus, FaSearchMinus } from 'react-icons/fa';
-import { format, startOfWeek, startOfDay, eachDayOfInterval, addDays, addMonths, subMonths, isSameDay, setYear, setMonth, getDay, isToday } from 'date-fns';
+import { format, startOfWeek, eachDayOfInterval, addDays, addMonths, subMonths, isSameDay, setYear, setMonth, getDay, isToday } from 'date-fns';
 import type { CalendarEvent } from '../../types';
 
 interface CalendarProps {
@@ -97,7 +97,13 @@ export const Calendar: React.FC<CalendarProps> = ({ events, onDayClick }) => {
 
 // --- SUB-COMPONENTS ---
 
-const MonthView = ({ currentDate, events, onDayClick }: any) => {
+interface MonthViewProps {
+    currentDate: Date;
+    events: CalendarEvent[];
+    onDayClick: (date: Date) => void;
+}
+
+const MonthView: React.FC<MonthViewProps> = ({ currentDate, events, onDayClick }) => {
     const daysInMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate();
     const firstDayIndex = getDay(setMonth(currentDate, currentDate.getMonth()).setDate(1)) || 7; 
     const offset = firstDayIndex === 0 ? 6 : firstDayIndex - 1; 
@@ -146,7 +152,15 @@ const MonthView = ({ currentDate, events, onDayClick }: any) => {
     );
 };
 
-const TimeGridView = ({ currentDate, events, days, onDayClick, hourHeight }: any) => {
+interface TimeGridViewProps {
+    currentDate: Date;
+    events: CalendarEvent[];
+    days: number;
+    onDayClick: (date: Date) => void;
+    hourHeight: number;
+}
+
+const TimeGridView: React.FC<TimeGridViewProps> = ({ currentDate, events, days, onDayClick, hourHeight }) => {
     const start = days === 1 ? currentDate : startOfWeek(currentDate, { weekStartsOn: 1 });
     const weekDays = eachDayOfInterval({ start, end: addDays(start, days - 1) });
     const hours = Array.from({ length: 24 }, (_, i) => i);
@@ -217,7 +231,13 @@ const TimeGridView = ({ currentDate, events, days, onDayClick, hourHeight }: any
     );
 };
 
-const DatePickerPopup = ({ currentDate, onSelect, onClose }: any) => {
+interface DatePickerPopupProps {
+    currentDate: Date;
+    onSelect: (month: number, year: number) => void;
+    onClose: () => void;
+}
+
+const DatePickerPopup: React.FC<DatePickerPopupProps> = ({ currentDate, onSelect, onClose }) => {
     const months = Array.from({ length: 12 }, (_, i) => new Date(0, i).toLocaleString('default', { month: 'short' }));
     const years = Array.from({ length: 10 }, (_, i) => new Date().getFullYear() - 5 + i);
 
@@ -231,7 +251,13 @@ const DatePickerPopup = ({ currentDate, onSelect, onClose }: any) => {
     );
 };
 
-const ViewBtn = ({ active, onClick, icon }: any) => (
+interface ViewBtnProps {
+    active: boolean;
+    onClick: () => void;
+    icon: React.ReactNode;
+}
+
+const ViewBtn: React.FC<ViewBtnProps> = ({ active, onClick, icon }) => (
     <button onClick={onClick} style={{ background: active ? 'white' : 'transparent', border: 'none', borderRadius: '2px', padding: '2px 4px', cursor: 'pointer', color: active ? '#007bff' : '#666' }}>{icon}</button>
 );
 

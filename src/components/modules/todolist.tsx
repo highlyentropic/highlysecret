@@ -4,7 +4,6 @@ import type { TodoItem, CalendarEvent } from '../../types';
 
 interface TodoListProps {
   moduleId: string;
-  listTitle: string;
   items: TodoItem[];
   allEvents: CalendarEvent[];
   backgroundColor?: string;
@@ -12,14 +11,13 @@ interface TodoListProps {
   onUpdateTodo: (id: string, data: Partial<TodoItem>) => void;
   onEditTodo: (item: TodoItem) => void;
   onDeleteTodo: (id: string) => void;
-  onUpdateListTitle: (title: string) => void;
   onMoveTodo: (itemId: string, targetModuleId: string) => void; 
   onReorderTodo: (itemId: string, targetId: string | null, position: 'before' | 'after' | 'inside') => void; // New prop
 }
 
 export const TodoList: React.FC<TodoListProps> = ({ 
-    moduleId, items, listTitle, backgroundColor = 'white',
-    onAddTodo, onUpdateTodo, onEditTodo, onDeleteTodo, onUpdateListTitle, onMoveTodo, onReorderTodo
+    moduleId, items, backgroundColor = 'white',
+    onAddTodo, onUpdateTodo, onEditTodo, onDeleteTodo, onMoveTodo, onReorderTodo
 }) => {
   
   const [newItemText, setNewItemText] = useState('');

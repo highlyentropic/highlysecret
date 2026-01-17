@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { Node as ProseMirrorNode } from '@tiptap/pm/model';
 import { useEditor, EditorContent, NodeViewWrapper, ReactNodeViewRenderer, Extension, mergeAttributes } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import { TaskList } from '@tiptap/extension-task-list';
@@ -11,14 +11,19 @@ import { Image } from '@tiptap/extension-image';
 import { Placeholder } from '@tiptap/extension-placeholder';
 import { 
     FaBold, FaItalic, FaStrikethrough, FaListUl, FaListOl, FaTasks, 
-    FaTable, FaImage, FaUndo, FaRedo, FaCalendarAlt
+    FaTable, FaImage, FaCalendarAlt
 } from 'react-icons/fa';
 import type { CalendarEvent } from '../../types';
 
 // --- CUSTOM NODES & EXTENSIONS ---
 
 // 1. Resizable Image Component
-const ResizableImageComponent = ({ node, updateAttributes }: any) => {
+interface ResizableImageComponentProps {
+    node: ProseMirrorNode;
+    updateAttributes: (attrs: { width: string }) => void;
+}
+
+const ResizableImageComponent: React.FC<ResizableImageComponentProps> = ({ node, updateAttributes }) => {
     return (
         <NodeViewWrapper className="image-node-view" style={{ display: 'inline-block', position: 'relative', lineHeight: 0 }}>
             <img 
@@ -54,7 +59,11 @@ const ResizableImageComponent = ({ node, updateAttributes }: any) => {
 };
 
 // 2. Reference Link Component
-const ReferenceNodeComponent = ({ node }: any) => {
+interface ReferenceNodeComponentProps {
+    node: ProseMirrorNode;
+}
+
+const ReferenceNodeComponent: React.FC<ReferenceNodeComponentProps> = ({ node }) => {
     const { id, type, label, color } = node.attrs;
     const isEvent = type === 'event';
     
@@ -142,7 +151,7 @@ export const Notepad: React.FC<NotepadProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-      const handler = (e: any) => {
+      const handler = (e: CustomEvent<{ id: string, type: string }>) => {
           const { id, type } = e.detail;
           if (type === 'event') {
               const evt = allEvents.find(ev => ev.id === id);
