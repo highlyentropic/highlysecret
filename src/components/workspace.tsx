@@ -246,10 +246,28 @@ export const Workspace = () => {
       const item = items.find(i => i.i === id);
       if (!item) return;
       let hasContent = false;
-      if (item.type === 'notepad' || item.type === 'stickynote') if (item.content && item.content.trim().length > 0) hasContent = true;
-      else if (item.type === 'whiteboard') if (item.content && item.content.length > 50) hasContent = true; 
-      else if (item.type === 'todo') if (globalTodos.some(t => t.originModuleId === id)) hasContent = true;
-      else if (item.type === 'planner') if (item.content && item.content.length > 50) hasContent = true;
+      if (item.type === 'notepad' || item.type === 'stickynote') {
+        if (item.content && item.content.trim().length > 0) hasContent = true;
+      }
+      else if (item.type === 'whiteboard') {
+        if (item.content && item.content.trim().length > 0) hasContent = true; 
+      }
+      else if (item.type === 'todo') {
+        if (globalTodos.some(t => t.originModuleId === id)) hasContent = true;
+      }
+      else if (item.type === 'planner') {
+        if (item.content) {
+            try {
+                const plannerData = JSON.parse(item.content);
+                if (plannerData.defs?.length > 0 || plannerData.plan?.length > 0) {
+                    hasContent = true;
+                }
+            } catch (e) {
+                // Failsafe in case of malformed content
+                if (item.content.length > 25) hasContent = true;
+            }
+        }
+      }
 
       if (hasContent) setDeleteConfirmId(id);
       else performDelete(id);
