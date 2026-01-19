@@ -99,6 +99,7 @@ export const Planner: React.FC<PlannerProps> = ({ content, onChange, bgColor }) 
 
   const handleDropOnLeft = (e: React.DragEvent) => {
     e.preventDefault();
+    e.stopPropagation(); // Prevent event from bubbling to grid's drop handler
     const defId = e.dataTransfer.getData('plannerDefId');
     if (defId) {
       addToPlan(defId);
@@ -111,7 +112,7 @@ export const Planner: React.FC<PlannerProps> = ({ content, onChange, bgColor }) 
       {/* LEFT PANEL: Planned Tasks */}
       <div 
         style={{ flex: 1, padding: '10px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}
-        onDragOver={(e) => e.preventDefault()}
+        onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
         onDrop={handleDropOnLeft}
       >
         {data.plan.length === 0 && (
@@ -162,11 +163,11 @@ export const Planner: React.FC<PlannerProps> = ({ content, onChange, bgColor }) 
       <div 
         className="planner-right-panel"
         style={{ 
-            width: '10%', height: '100%', 
+            width: '10%', height: '90%', 
             background: 'rgba(0,0,0,0.03)', borderLeft: '1px solid rgba(0,0,0,0.1)',
             display: 'flex', flexDirection: 'column',
             transition: 'width 0.3s ease',
-            position: 'absolute', right: 0, top: 0,
+            position: 'absolute', right: 0, top: '5%',
             zIndex: 10,
             overflow: 'hidden'
         }}
