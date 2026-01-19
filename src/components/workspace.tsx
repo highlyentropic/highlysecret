@@ -10,7 +10,7 @@ import { EventsList } from './modules/eventslist';
 import { Planner } from './modules/planner';
 import type { CalendarEvent, TodoItem } from '../types';
 import { StickyNote } from './modules/stickynote'; 
-import { FaRegStickyNote, FaRegClock, FaPencilAlt, FaCalendarAlt, FaCheckSquare, FaList, FaTrash, FaPalette, FaExclamationTriangle, FaMinus, FaTasks } from 'react-icons/fa';
+import { FaRegStickyNote, FaRegClock, FaPencilAlt, FaCalendarAlt, FaCheckSquare, FaList, FaTrash, FaPalette, FaExclamationTriangle, FaMinus, FaTasks, FaTh, FaExpand } from 'react-icons/fa';
 
 const ReactGridLayout = WidthProvider(RGL);
 
@@ -91,14 +91,39 @@ const MODULE_ICONS = {
 };
 
 export const Workspace = () => {
-  const [items, setItems] = useState<ModuleItem[]>(() => loadState('ws_items', []));
-  const [minimizedItems, setMinimizedItems] = useState<ModuleItem[]>(() => loadState('ws_minimized', []));
+  // View mode state
+  const initialViewMode = loadState<'free' | 'structured'>('ws_viewMode', 'free');
+  const [viewMode, setViewMode] = useState<'free' | 'structured'>(initialViewMode);
+  
+  // View-specific state loading
+  const [items, setItems] = useState<ModuleItem[]>(() => {
+    const saved = loadState<ModuleItem[]>(`ws_items_${initialViewMode}`, []);
+    // Fallback to old format for migration
+    if (saved.length === 0) {
+      const oldItems = loadState<ModuleItem[]>('ws_items', []);
+      if (oldItems.length > 0) return oldItems;
+    }
+    return saved;
+  });
+  const [minimizedItems, setMinimizedItems] = useState<ModuleItem[]>(() => {
+    const saved = loadState<ModuleItem[]>(`ws_minimized_${initialViewMode}`, []);
+    // Fallback to old format for migration
+    if (saved.length === 0) {
+      const oldMinimized = loadState<ModuleItem[]>('ws_minimized', []);
+      if (oldMinimized.length > 0) return oldMinimized;
+    }
+    return saved;
+  });
   const [globalEvents, setGlobalEvents] = useState<CalendarEvent[]>(() => loadState('ws_events', []));
   const [globalTodos, setGlobalTodos] = useState<TodoItem[]>(() => loadState('ws_todos', []));
   const [holidayEvents, setHolidayEvents] = useState<CalendarEvent[]>([]);
 
-  useEffect(() => { localStorage.setItem('ws_items', JSON.stringify(items)); }, [items]);
-  useEffect(() => { localStorage.setItem('ws_minimized', JSON.stringify(minimizedItems)); }, [minimizedItems]);
+  // Save view mode
+  useEffect(() => { localStorage.setItem('ws_viewMode', JSON.stringify(viewMode)); }, [viewMode]);
+  
+  // Save view-specific items and minimized items
+  useEffect(() => { localStorage.setItem(`ws_items_${viewMode}`, JSON.stringify(items)); }, [items, viewMode]);
+  useEffect(() => { localStorage.setItem(`ws_minimized_${viewMode}`, JSON.stringify(minimizedItems)); }, [minimizedItems, viewMode]);
   useEffect(() => { localStorage.setItem('ws_events', JSON.stringify(globalEvents)); }, [globalEvents]);
   useEffect(() => { localStorage.setItem('ws_todos', JSON.stringify(globalTodos)); }, [globalTodos]);
 
@@ -128,6 +153,7 @@ export const Workspace = () => {
   const [isDropping, setIsDropping] = useState(false);
   const [gridHeight, setGridHeight] = useState(800);
   const [maxRows, setMaxRows] = useState(50);
+  const [isDragging, setIsDragging] = useState(false);
   
   // Modals
   const [showModal, setShowModal] = useState(false);
@@ -141,18 +167,91 @@ export const Workspace = () => {
     const handleResize = () => {
         const h = window.innerHeight - TOOLBAR_HEIGHT - FOOTER_HEIGHT;
         setGridHeight(h);
-        setMaxRows(Math.floor(h / ROW_HEIGHT));
+        const newMaxRows = Math.floor(h / ROW_HEIGHT);
+        setMaxRows(newMaxRows);
+        
+        // If in structured view, update all module heights
+        if (viewMode === 'structured') {
+            setItems(prevItems => prevItems.map(item => ({
+                ...item,
+                h: newMaxRows
+            })));
+        }
     };
     handleResize(); 
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
-  }, []);
+  }, [viewMode]);
 
   useEffect(() => {
       const clickHandler = () => setPaletteOpenId(null);
       window.addEventListener('click', clickHandler);
       return () => window.removeEventListener('click', clickHandler);
   }, []);
+
+  // Calculate structured layout: group by type and stack horizontally
+  const calculateStructuredLayout = (modules: ModuleItem[]): ModuleItem[] => {
+    if (modules.length === 0) return [];
+    
+    // Group by type
+    const grouped = modules.reduce((acc, mod) => {
+      if (!acc[mod.type]) acc[mod.type] = [];
+      acc[mod.type].push(mod);
+      return acc;
+    }, {} as Record<ModuleType, ModuleItem[]>);
+    
+    // Sort groups by type order (matching toolbar order)
+    const typeOrder: ModuleType[] = ['notepad', 'stickynote', 'whiteboard', 'todo', 'planner', 'calendar', 'events', 'clock'];
+    const sortedTypes = typeOrder.filter(t => grouped[t]);
+    
+    // Stack horizontally
+    let currentX = 0;
+    const result: ModuleItem[] = [];
+    
+    sortedTypes.forEach(type => {
+      grouped[type].forEach(mod => {
+        result.push({
+          ...mod,
+          x: currentX,
+          y: 0,
+          w: 16,
+          h: maxRows
+        });
+        currentX += 16;
+      });
+    });
+    
+    return result;
+  };
+
+  // Toggle view mode
+  const toggleViewMode = () => {
+    const newMode: 'free' | 'structured' = viewMode === 'free' ? 'structured' : 'free';
+    
+    // Save current state
+    localStorage.setItem(`ws_items_${viewMode}`, JSON.stringify(items));
+    localStorage.setItem(`ws_minimized_${viewMode}`, JSON.stringify(minimizedItems));
+    
+    // Load new view state (if empty, use current items as fallback)
+    let newItems = loadState<ModuleItem[]>(`ws_items_${newMode}`, []);
+    const newMinimizedItems = loadState<ModuleItem[]>(`ws_minimized_${newMode}`, []);
+    
+    // If no saved state for new view, use current items
+    if (newItems.length === 0 && items.length > 0) {
+      newItems = [...items];
+    }
+    
+    // If switching to structured, calculate layout
+    if (newMode === 'structured') {
+      const structuredItems = calculateStructuredLayout(newItems);
+      setItems(structuredItems);
+    } else {
+      setItems(newItems);
+    }
+    
+    setMinimizedItems(newMinimizedItems);
+    setViewMode(newMode);
+  };
 
   const onDragStart = (e: React.DragEvent, type: ModuleType) => {
     e.dataTransfer.setData("text/plain", "");
@@ -178,13 +277,29 @@ export const Workspace = () => {
     if (restoreId) {
         const itemToRestore = minimizedItems.find(i => i.i === restoreId);
         if (itemToRestore) {
-            // Restore to dropped position
-            const restored = { 
+            if (viewMode === 'structured') {
+              // In structured view, add to end and recalculate
+              const restored = {
+                ...itemToRestore,
+                x: items.length * 16,
+                y: 0,
+                w: 16,
+                h: maxRows
+              };
+              const updatedItems = [...items, restored];
+              const structuredItems = calculateStructuredLayout(updatedItems);
+              setItems(structuredItems);
+            } else {
+              // Free view: restore to dropped position
+              const restored = { 
                 ...itemToRestore, 
-                x: layoutItem.x, y: layoutItem.y 
-                // w and h preserved from minimized state
-            };
-            setItems(prev => [...prev, restored]);
+                x: layoutItem.x, 
+                y: layoutItem.y,
+                w: itemToRestore.prevPos?.w || itemToRestore.w,
+                h: itemToRestore.prevPos?.h || itemToRestore.h
+              };
+              setItems(prev => [...prev, restored]);
+            }
             setMinimizedItems(prev => prev.filter(i => i.i !== restoreId));
         }
         setIsDropping(false);
@@ -204,10 +319,23 @@ export const Workspace = () => {
     if (draggingType === 'planner') defaultTitle = "Planner";
 
     const newItem: ModuleItem = {
-        i: uniqueId, x: layoutItem.x, y: layoutItem.y, w: specs.w, h: specs.h, type: draggingType,
+        i: uniqueId, 
+        x: viewMode === 'structured' ? items.length * 16 : layoutItem.x, 
+        y: viewMode === 'structured' ? 0 : layoutItem.y, 
+        w: viewMode === 'structured' ? 16 : specs.w, 
+        h: viewMode === 'structured' ? maxRows : specs.h, 
+        type: draggingType,
         title: defaultTitle, content: '', clockMode: 'analog', listTitle: '', themeIndex: 0
     };
-    setItems(prev => [...prev, newItem]);
+    
+    if (viewMode === 'structured') {
+      // In structured view, add to end and recalculate layout
+      const updatedItems = [...items, newItem];
+      const structuredItems = calculateStructuredLayout(updatedItems);
+      setItems(structuredItems);
+    } else {
+      setItems(prev => [...prev, newItem]);
+    }
     setIsDropping(false);
   };
 
@@ -227,18 +355,34 @@ export const Workspace = () => {
       const item = minimizedItems.find(i => i.i === id);
       if (!item) return;
 
-      const newX = dropX !== undefined ? dropX : (item.prevPos?.x || 0);
-      const newY = dropY !== undefined ? dropY : (item.prevPos?.y || 0);
+      let restoredItem: ModuleItem;
       
-      // Check collision simply by letting RGL handle it or just appending
-      const restoredItem = { 
+      if (viewMode === 'structured') {
+        // In structured view, add to end and recalculate
+        restoredItem = {
+          ...item,
+          x: items.length * 16,
+          y: 0,
+          w: 16,
+          h: maxRows
+        };
+        const updatedItems = [...items, restoredItem];
+        const structuredItems = calculateStructuredLayout(updatedItems);
+        setItems(structuredItems);
+      } else {
+        // Free view: use saved position or provided drop position
+        const newX = dropX !== undefined ? dropX : (item.prevPos?.x || 0);
+        const newY = dropY !== undefined ? dropY : (item.prevPos?.y || 0);
+        restoredItem = { 
           ...item, 
-          x: newX, y: newY, 
+          x: newX, 
+          y: newY, 
           w: item.prevPos?.w || item.w, 
           h: item.prevPos?.h || item.h 
-      };
+        };
+        setItems(prev => [...prev, restoredItem]);
+      }
       
-      setItems(prev => [...prev, restoredItem]);
       setMinimizedItems(prev => prev.filter(i => i.i !== id));
   };
 
@@ -422,6 +566,50 @@ export const Workspace = () => {
       });
   };
   
+  // Handle layout changes - different behavior for structured vs free view
+  const handleLayoutChange = (newLayout: Layout[]) => {
+    if (isDropping) return;
+    
+    if (viewMode === 'structured') {
+      // In structured view, reorder modules based on x position and snap to grid
+      const sortedLayout = [...newLayout].sort((a, b) => a.x - b.x);
+      const reorderedItems: ModuleItem[] = [];
+      
+      sortedLayout.forEach((layoutItem, index) => {
+        const item = items.find(i => i.i === layoutItem.i);
+        if (item) {
+          // Snap to correct position based on order (0, 16, 32, 48, ...)
+          reorderedItems.push({
+            ...item,
+            x: index * 16,
+            y: 0,
+            w: 16,
+            h: maxRows
+          });
+        }
+      });
+      
+      setItems(reorderedItems);
+    } else {
+      // Free view: normal behavior
+      setItems(prevItems => prevItems.map(item => {
+        const match = newLayout.find(l => l.i === item.i);
+        return match ? { ...item, x: match.x, y: match.y, w: match.w, h: match.h } : item;
+      }));
+    }
+  };
+
+  // Drag handlers for zoom effect in structured view
+  const handleDragStart = () => {
+    if (viewMode === 'structured') {
+      setIsDragging(true);
+    }
+  };
+
+  const handleDragStop = () => {
+    setIsDragging(false);
+  };
+
   const getVisibleTodos = (module: ModuleItem) => globalTodos.filter(t => t.originModuleId === module.i);
   const currentSpecs = MODULE_SPECS[draggingType];
   const hasClock = items.some(i => i.type === 'clock');
@@ -446,8 +634,27 @@ export const Workspace = () => {
                 <span style={{fontSize: '9px', marginTop: '4px'}}>{tool.label}</span>
             </div>
         ))}
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '5px' }}>
-            
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <button
+            onClick={toggleViewMode}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '8px 16px',
+              border: '1px solid #ccc',
+              borderRadius: '5px',
+              background: viewMode === 'structured' ? '#007bff' : 'white',
+              color: viewMode === 'structured' ? 'white' : '#333',
+              cursor: 'pointer',
+              fontSize: '12px',
+              fontWeight: 'bold'
+            }}
+            title={`Switch to ${viewMode === 'free' ? 'Structured' : 'Free'} view`}
+          >
+            {viewMode === 'free' ? <FaTh size={16} /> : <FaExpand size={16} />}
+            <span>{viewMode === 'free' ? 'Structured' : 'Free'}</span>
+          </button>
         </div>
       </div>
 
@@ -499,8 +706,58 @@ export const Workspace = () => {
       )}
 
       {/* GRID */}
-      <div style={{ flex: 1, overflow: 'hidden', position: 'relative', zIndex: 1 }}> 
-        <ReactGridLayout className="layout" layout={items.map(i => { const spec = MODULE_SPECS[i.type]; return { i: i.i, x: i.x, y: i.y, w: i.w, h: i.h, minW: spec.minW, minH: spec.minH }; })} cols={COLS} rowHeight={ROW_HEIGHT} width={1200} margin={[0, 0]} style={{ height: gridHeight + 'px' }} isDroppable={true} onDrop={onDrop} isBounded={true} maxRows={maxRows} compactType={null} preventCollision={true} isResizable={true} onLayoutChange={(newLayout) => { if (isDropping) return; setItems(prevItems => prevItems.map(item => { const match = newLayout.find(l => l.i === item.i); return match ? { ...item, x: match.x, y: match.y, w: match.w, h: match.h } : item; })); }} droppingItem={{ i: 'placeholder', w: currentSpecs.w, h: currentSpecs.h }} draggableHandle=".drag-handle">
+      <div 
+        style={{ 
+          flex: 1, 
+          overflow: 'auto', 
+          position: 'relative', 
+          zIndex: 1
+        }}
+      >
+        <div
+          style={{
+            transform: isDragging && viewMode === 'structured' ? 'scale(0.75)' : 'scale(1)',
+            transformOrigin: 'center center',
+            transition: isDragging ? 'none' : 'transform 0.2s ease-out',
+            width: '100%',
+            height: '100%'
+          }}
+        > 
+        <ReactGridLayout 
+          className="layout" 
+          layout={items.map(i => { 
+            const spec = MODULE_SPECS[i.type]; 
+            return { 
+              i: i.i, 
+              x: i.x, 
+              y: i.y, 
+              w: i.w, 
+              h: i.h, 
+              minW: viewMode === 'structured' ? 16 : spec.minW, 
+              minH: viewMode === 'structured' ? maxRows : spec.minH,
+              maxW: viewMode === 'structured' ? 16 : undefined,
+              maxH: viewMode === 'structured' ? maxRows : undefined
+            }; 
+          })} 
+          cols={COLS} 
+          rowHeight={ROW_HEIGHT} 
+          width={1200} 
+          margin={[0, 0]} 
+          style={{ height: gridHeight + 'px' }} 
+          isDroppable={true} 
+          onDrop={onDrop} 
+          isBounded={true} 
+          maxRows={maxRows} 
+          compactType={null} 
+          preventCollision={true} 
+          isResizable={viewMode === 'free'} 
+          isDraggable={true}
+          onLayoutChange={handleLayoutChange}
+          onDragStart={handleDragStart}
+          onDragStop={handleDragStop}
+          droppingItem={{ i: 'placeholder', w: currentSpecs.w, h: currentSpecs.h }} 
+          draggableHandle=".drag-handle"
+        >
           {items.map((item) => {
              const theme = THEMES[item.themeIndex || 0] || THEMES[0];
              return (
@@ -609,8 +866,9 @@ export const Workspace = () => {
               </div>
             </div>
           );
-        })}
+          })}
         </ReactGridLayout>
+        </div>
       </div>
 
       {/* MINIMIZED BAR */}

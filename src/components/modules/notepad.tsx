@@ -1,3 +1,4 @@
+import React, { useState, useRef, useEffect } from 'react';
 import { Node as ProseMirrorNode } from '@tiptap/pm/model';
 import { useEditor, EditorContent, NodeViewWrapper, ReactNodeViewRenderer, Extension, mergeAttributes } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
