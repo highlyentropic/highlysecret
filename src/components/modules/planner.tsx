@@ -35,11 +35,13 @@ export const Planner: React.FC<PlannerProps> = ({ content, onChange, bgColor }) 
   // Persist changes
   useEffect(() => {
     onChange(JSON.stringify(data));
-  }, [data, onChange]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
 
   const [editingDefId, setEditingDefId] = useState<string | null>(null);
   const [tempText, setTempText] = useState('');
   const [isAddingNew, setIsAddingNew] = useState(false);
+  const [isLibraryExpanded, setIsLibraryExpanded] = useState(false);
 
   // --- ACTIONS ---
 
@@ -111,7 +113,16 @@ export const Planner: React.FC<PlannerProps> = ({ content, onChange, bgColor }) 
       
       {/* LEFT PANEL: Planned Tasks */}
       <div 
-        style={{ flex: 1, padding: '10px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}
+        style={{ 
+          flex: 1, 
+          padding: '10px', 
+          paddingRight: isLibraryExpanded ? 'calc(50% + 15px)' : 'calc(10% + 15px)', 
+          overflowY: 'auto', 
+          display: 'flex', 
+          flexDirection: 'column', 
+          gap: '8px',
+          transition: 'padding-right 0.3s ease'
+        }}
         onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
         onDrop={handleDropOnLeft}
       >
@@ -163,18 +174,56 @@ export const Planner: React.FC<PlannerProps> = ({ content, onChange, bgColor }) 
       <div 
         className="planner-right-panel"
         style={{ 
-            width: '10%', height: '90%', 
-            background: 'rgba(0,0,0,0.03)', borderLeft: '1px solid rgba(0,0,0,0.1)',
-            display: 'flex', flexDirection: 'column',
-            transition: 'width 0.3s ease',
-            position: 'absolute', right: 0, top: '5%',
+            width: isLibraryExpanded ? '50%' : '10%', 
+            height: '90%', 
+            background: 'rgba(255, 255, 255, 0.95)', 
+            borderLeft: '1px solid rgba(0,0,0,0.1)',
+            display: 'flex', 
+            flexDirection: 'column',
+            transition: 'width 0.3s ease, opacity 0.3s ease',
+            position: 'absolute', 
+            right: 0, 
+            top: '5%',
             zIndex: 10,
-            overflow: 'hidden'
+            overflow: 'hidden',
+            boxShadow: isLibraryExpanded ? '-2px 0 8px rgba(0,0,0,0.1)' : 'none'
         }}
-        onMouseEnter={(e) => e.currentTarget.style.width = '50%'}
-        onMouseLeave={(e) => e.currentTarget.style.width = '10%'}
+        onMouseEnter={() => setIsLibraryExpanded(true)}
+        onMouseLeave={() => setIsLibraryExpanded(false)}
       >
-        <div style={{ flex: 1, padding: '10px', overflowY: 'auto', minWidth: '200px' }}>
+        {/* Collapsed state: Rotated text */}
+        {!isLibraryExpanded && (
+          <div 
+            style={{
+              position: 'absolute',
+              top: '50%',
+              left: '50%',
+              transform: 'translate(-50%, -50%) rotate(-90deg)',
+              whiteSpace: 'nowrap',
+              fontSize: '12px',
+              fontWeight: 'bold',
+              color: '#666',
+              opacity: 0.7,
+              pointerEvents: 'none',
+              transition: 'opacity 0.3s ease'
+            }}
+          >
+            Task Library
+          </div>
+        )}
+        
+        {/* Expanded state: Full content */}
+        <div 
+          style={{ 
+            flex: 1, 
+            padding: '10px', 
+            overflowY: 'auto', 
+            minWidth: '200px',
+            opacity: isLibraryExpanded ? 1 : 0,
+            transition: 'opacity 0.3s ease',
+            pointerEvents: isLibraryExpanded ? 'auto' : 'none'
+          }}
+        >
             <h4 style={{ margin: '0 0 10px 0', fontSize: '12px', opacity: 0.7, textTransform: 'uppercase' }}>Task Library</h4>
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
