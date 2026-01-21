@@ -154,6 +154,7 @@ export const Workspace = () => {
   const [gridHeight, setGridHeight] = useState(800);
   const [maxRows, setMaxRows] = useState(50);
   const [isDragging, setIsDragging] = useState(false);
+  const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
   
   // Modals
   const [showModal, setShowModal] = useState(false);
@@ -232,21 +233,45 @@ export const Workspace = () => {
     localStorage.setItem(`ws_items_${viewMode}`, JSON.stringify(items));
     localStorage.setItem(`ws_minimized_${viewMode}`, JSON.stringify(minimizedItems));
     
-    // Load new view state (if empty, use current items as fallback)
+    // Load new view state
     let newItems = loadState<ModuleItem[]>(`ws_items_${newMode}`, []);
     const newMinimizedItems = loadState<ModuleItem[]>(`ws_minimized_${newMode}`, []);
     
-    // If no saved state for new view, use current items
-    if (newItems.length === 0 && items.length > 0) {
-      newItems = [...items];
-    }
+    // Merge modules: combine items from both views, removing duplicates by ID
+    // This ensures modules added in one view appear in the other
+    const currentItemIds = new Set(items.map(i => i.i));
+    const newItemIds = new Set(newItems.map(i => i.i));
+    
+    // Add items from current view that don't exist in new view
+    const itemsToAdd = items.filter(item => !newItemIds.has(item.i));
+    
+    // Add items from new view that don't exist in current view
+    const itemsFromNew = newItems.filter(item => !currentItemIds.has(item.i));
+    
+    // Combine: start with new view's items, add missing ones from current view
+    const mergedItems = [...newItems, ...itemsToAdd];
     
     // If switching to structured, calculate layout
     if (newMode === 'structured') {
-      const structuredItems = calculateStructuredLayout(newItems);
+      const structuredItems = calculateStructuredLayout(mergedItems);
       setItems(structuredItems);
     } else {
-      setItems(newItems);
+      // For free view, add new items at default positions
+      const itemsWithDefaults = mergedItems.map((item, index) => {
+        if (itemsToAdd.includes(item)) {
+          // New item from structured view - use default position
+          const spec = MODULE_SPECS[item.type];
+          return {
+            ...item,
+            x: (index % 10) * 16,
+            y: Math.floor(index / 10) * 12,
+            w: spec.w,
+            h: spec.h
+          };
+        }
+        return item;
+      });
+      setItems(itemsWithDefaults);
     }
     
     setMinimizedItems(newMinimizedItems);
@@ -301,6 +326,36 @@ export const Workspace = () => {
               setItems(prev => [...prev, restored]);
             }
             setMinimizedItems(prev => prev.filter(i => i.i !== restoreId));
+            
+            // Also restore in the other view's storage
+            const otherMode: 'free' | 'structured' = viewMode === 'free' ? 'structured' : 'free';
+            const otherMinimized = loadState<ModuleItem[]>(`ws_minimized_${otherMode}`, []);
+            const otherItemToRestore = otherMinimized.find(i => i.i === restoreId);
+            if (otherItemToRestore) {
+              const otherItems = loadState<ModuleItem[]>(`ws_items_${otherMode}`, []);
+              const otherRestored: ModuleItem = otherMode === 'structured' 
+                ? {
+                    ...otherItemToRestore,
+                    x: otherItems.length * 16,
+                    y: 0,
+                    w: 16,
+                    h: maxRows
+                  }
+                : {
+                    ...otherItemToRestore,
+                    x: otherItemToRestore.prevPos?.x || 0,
+                    y: otherItemToRestore.prevPos?.y || 0,
+                    w: otherItemToRestore.prevPos?.w || otherItemToRestore.w,
+                    h: otherItemToRestore.prevPos?.h || otherItemToRestore.h
+                  };
+              
+              const updatedOtherItems = otherMode === 'structured'
+                ? calculateStructuredLayout([...otherItems, otherRestored])
+                : [...otherItems, otherRestored];
+              
+              localStorage.setItem(`ws_items_${otherMode}`, JSON.stringify(updatedOtherItems));
+              localStorage.setItem(`ws_minimized_${otherMode}`, JSON.stringify(otherMinimized.filter(i => i.i !== restoreId)));
+            }
         }
         setIsDropping(false);
         return;
@@ -328,6 +383,7 @@ export const Workspace = () => {
         title: defaultTitle, content: '', clockMode: 'analog', listTitle: '', themeIndex: 0
     };
     
+    // Add to current view
     if (viewMode === 'structured') {
       // In structured view, add to end and recalculate layout
       const updatedItems = [...items, newItem];
@@ -336,6 +392,26 @@ export const Workspace = () => {
     } else {
       setItems(prev => [...prev, newItem]);
     }
+    
+    // Also add to the other view's storage (with appropriate positioning)
+    const otherMode: 'free' | 'structured' = viewMode === 'free' ? 'structured' : 'free';
+    const otherItems = loadState<ModuleItem[]>(`ws_items_${otherMode}`, []);
+    
+    // Check if module already exists in other view (shouldn't, but be safe)
+    if (!otherItems.some(i => i.i === uniqueId)) {
+      const otherViewItem: ModuleItem = {
+        ...newItem,
+        x: otherMode === 'structured' ? otherItems.length * 16 : (otherItems.length % 10) * 16,
+        y: otherMode === 'structured' ? 0 : Math.floor(otherItems.length / 10) * 12,
+        w: otherMode === 'structured' ? 16 : specs.w,
+        h: otherMode === 'structured' ? maxRows : specs.h
+      };
+      const updatedOtherItems = otherMode === 'structured' 
+        ? calculateStructuredLayout([...otherItems, otherViewItem])
+        : [...otherItems, otherViewItem];
+      localStorage.setItem(`ws_items_${otherMode}`, JSON.stringify(updatedOtherItems));
+    }
+    
     setIsDropping(false);
   };
 
@@ -384,6 +460,36 @@ export const Workspace = () => {
       }
       
       setMinimizedItems(prev => prev.filter(i => i.i !== id));
+      
+      // Also restore in the other view's storage
+      const otherMode: 'free' | 'structured' = viewMode === 'free' ? 'structured' : 'free';
+      const otherMinimized = loadState<ModuleItem[]>(`ws_minimized_${otherMode}`, []);
+      const otherItem = otherMinimized.find(i => i.i === id);
+      if (otherItem) {
+        const otherItems = loadState<ModuleItem[]>(`ws_items_${otherMode}`, []);
+        const otherRestored: ModuleItem = otherMode === 'structured' 
+          ? {
+              ...otherItem,
+              x: otherItems.length * 16,
+              y: 0,
+              w: 16,
+              h: maxRows
+            }
+          : {
+              ...otherItem,
+              x: otherItem.prevPos?.x || 0,
+              y: otherItem.prevPos?.y || 0,
+              w: otherItem.prevPos?.w || otherItem.w,
+              h: otherItem.prevPos?.h || otherItem.h
+            };
+        
+        const updatedOtherItems = otherMode === 'structured'
+          ? calculateStructuredLayout([...otherItems, otherRestored])
+          : [...otherItems, otherRestored];
+        
+        localStorage.setItem(`ws_items_${otherMode}`, JSON.stringify(updatedOtherItems));
+        localStorage.setItem(`ws_minimized_${otherMode}`, JSON.stringify(otherMinimized.filter(i => i.i !== id)));
+      }
   };
 
   const requestDelete = (id: string) => {
@@ -402,6 +508,18 @@ export const Workspace = () => {
   const performDelete = (id: string) => {
       setItems(prev => prev.filter(i => i.i !== id));
       setGlobalTodos(prev => prev.filter(t => t.originModuleId !== id));
+      
+      // Also remove from the other view's storage
+      const otherMode: 'free' | 'structured' = viewMode === 'free' ? 'structured' : 'free';
+      const otherItems = loadState<ModuleItem[]>(`ws_items_${otherMode}`, []);
+      const updatedOtherItems = otherItems.filter(i => i.i !== id);
+      localStorage.setItem(`ws_items_${otherMode}`, JSON.stringify(updatedOtherItems));
+      
+      // Also remove from minimized items in both views
+      const otherMinimized = loadState<ModuleItem[]>(`ws_minimized_${otherMode}`, []);
+      const updatedOtherMinimized = otherMinimized.filter(i => i.i !== id);
+      localStorage.setItem(`ws_minimized_${otherMode}`, JSON.stringify(updatedOtherMinimized));
+      
       setDeleteConfirmId(null);
   };
 
@@ -571,14 +689,18 @@ export const Workspace = () => {
     if (isDropping) return;
     
     if (viewMode === 'structured') {
-      // In structured view, reorder modules based on x position and snap to grid
+      // If dragging, don't update here - let handleDrag handle it
+      if (draggedItemId) {
+        return;
+      }
+      
+      // No drag in progress, just snap to positions
       const sortedLayout = [...newLayout].sort((a, b) => a.x - b.x);
       const reorderedItems: ModuleItem[] = [];
       
       sortedLayout.forEach((layoutItem, index) => {
         const item = items.find(i => i.i === layoutItem.i);
         if (item) {
-          // Snap to correct position based on order (0, 16, 32, 48, ...)
           reorderedItems.push({
             ...item,
             x: index * 16,
@@ -590,6 +712,8 @@ export const Workspace = () => {
       });
       
       setItems(reorderedItems);
+      return;
+
     } else {
       // Free view: normal behavior
       setItems(prevItems => prevItems.map(item => {
@@ -600,14 +724,129 @@ export const Workspace = () => {
   };
 
   // Drag handlers for zoom effect in structured view
-  const handleDragStart = () => {
+  const handleDragStart = (layout: Layout[], oldItem: Layout, newItem: Layout, placeholder: Layout, e: MouseEvent, element: HTMLElement) => {
     if (viewMode === 'structured') {
       setIsDragging(true);
+      setDraggedItemId(newItem.i);
     }
   };
 
-  const handleDragStop = () => {
-    setIsDragging(false);
+  const handleDrag = (layout: Layout[], oldItem: Layout, newItem: Layout, placeholder: Layout, e: MouseEvent, element: HTMLElement) => {
+    if (viewMode === 'structured' && draggedItemId && newItem.i === draggedItemId) {
+      // Force y to 0 - prevent any vertical movement
+      if (newItem.y !== 0) {
+        // This shouldn't happen, but ensure it's always 0
+        return;
+      }
+      
+      // Calculate insertion point based on dragged item's x position
+      // Use the current items array to get the order, not the layout
+      const currentOrder = items
+        .filter(item => item.i !== draggedItemId)
+        .sort((a, b) => a.x - b.x);
+      
+      // Calculate which position the dragged item should be inserted at
+      // Based on x position: each module is 16 units wide
+      const draggedX = newItem.x;
+      const insertionIndex = Math.max(0, Math.min(Math.round(draggedX / 16), currentOrder.length));
+      
+      // Build reordered items array with strict ordering
+      const reorderedItems: ModuleItem[] = [];
+      
+      // Add items before insertion point
+      for (let i = 0; i < insertionIndex; i++) {
+        const item = currentOrder[i];
+        reorderedItems.push({
+          ...item,
+          x: i * 16,
+          y: 0,
+          w: 16,
+          h: maxRows
+        });
+      }
+      
+      // Add dragged item at insertion point (keep its current drag x position for visual feedback)
+      const draggedItem = items.find(i => i.i === draggedItemId);
+      if (draggedItem) {
+        reorderedItems.push({
+          ...draggedItem,
+          x: draggedX, // Keep actual drag position during drag for visual feedback
+          y: 0,
+          w: 16,
+          h: maxRows
+        });
+      }
+      
+      // Add items after insertion point
+      for (let i = insertionIndex; i < currentOrder.length; i++) {
+        const item = currentOrder[i];
+        reorderedItems.push({
+          ...item,
+          x: (i + 1) * 16,
+          y: 0,
+          w: 16,
+          h: maxRows
+        });
+      }
+      
+      setItems(reorderedItems);
+    }
+  };
+
+  const handleDragStop = (layout: Layout[], oldItem: Layout, newItem: Layout, placeholder: Layout, e: MouseEvent, element: HTMLElement) => {
+    if (viewMode === 'structured' && draggedItemId) {
+      // Finalize order - snap all items to strict positions
+      const currentOrder = items
+        .filter(item => item.i !== draggedItemId)
+        .sort((a, b) => a.x - b.x);
+      
+      // Calculate final insertion index based on dragged item's final x position
+      const draggedX = newItem.x;
+      const insertionIndex = Math.max(0, Math.min(Math.round(draggedX / 16), currentOrder.length));
+      
+      // Build final reordered items with strict positions
+      const reorderedItems: ModuleItem[] = [];
+      
+      // Add items before insertion point
+      for (let i = 0; i < insertionIndex; i++) {
+        const item = currentOrder[i];
+        reorderedItems.push({
+          ...item,
+          x: i * 16,
+          y: 0,
+          w: 16,
+          h: maxRows
+        });
+      }
+      
+      // Add dragged item at insertion point
+      const draggedItem = items.find(i => i.i === draggedItemId);
+      if (draggedItem) {
+        reorderedItems.push({
+          ...draggedItem,
+          x: insertionIndex * 16,
+          y: 0,
+          w: 16,
+          h: maxRows
+        });
+      }
+      
+      // Add items after insertion point
+      for (let i = insertionIndex; i < currentOrder.length; i++) {
+        const item = currentOrder[i];
+        reorderedItems.push({
+          ...item,
+          x: (i + 1) * 16,
+          y: 0,
+          w: 16,
+          h: maxRows
+        });
+      }
+      
+      setItems(reorderedItems);
+      setIsDragging(false);
+      setDraggedItemId(null);
+    }
   };
 
   const getVisibleTodos = (module: ModuleItem) => globalTodos.filter(t => t.originModuleId === module.i);
@@ -709,7 +948,8 @@ export const Workspace = () => {
       <div 
         style={{ 
           flex: 1, 
-          overflow: 'auto', 
+          overflowX: viewMode === 'structured' ? 'auto' : 'auto',
+          overflowY: viewMode === 'structured' ? 'hidden' : 'auto',
           position: 'relative', 
           zIndex: 1
         }}
@@ -719,7 +959,8 @@ export const Workspace = () => {
             transform: isDragging && viewMode === 'structured' ? 'scale(0.75)' : 'scale(1)',
             transformOrigin: 'center center',
             transition: isDragging ? 'none' : 'transform 0.2s ease-out',
-            width: '100%',
+            width: viewMode === 'structured' ? `${Math.max(1200, items.length * 16 * (1200 / COLS))}px` : '100%',
+            minWidth: viewMode === 'structured' ? `${Math.max(1200, items.length * 16 * (1200 / COLS))}px` : 'auto',
             height: '100%'
           }}
         > 
@@ -730,33 +971,37 @@ export const Workspace = () => {
             return { 
               i: i.i, 
               x: i.x, 
-              y: i.y, 
+              y: viewMode === 'structured' ? 0 : i.y, 
               w: i.w, 
               h: i.h, 
               minW: viewMode === 'structured' ? 16 : spec.minW, 
               minH: viewMode === 'structured' ? maxRows : spec.minH,
               maxW: viewMode === 'structured' ? 16 : undefined,
-              maxH: viewMode === 'structured' ? maxRows : undefined
+              maxH: viewMode === 'structured' ? maxRows : undefined,
+              static: false
             }; 
           })} 
           cols={COLS} 
           rowHeight={ROW_HEIGHT} 
-          width={1200} 
+          width={viewMode === 'structured' ? Math.max(1200, items.length * 16 * (1200 / COLS)) : 1200} 
           margin={[0, 0]} 
           style={{ height: gridHeight + 'px' }} 
           isDroppable={true} 
           onDrop={onDrop} 
-          isBounded={true} 
-          maxRows={maxRows} 
+          isBounded={viewMode === 'structured' ? false : true} 
+          maxRows={viewMode === 'structured' ? 1 : maxRows} 
           compactType={null} 
-          preventCollision={true} 
+          preventCollision={viewMode === 'structured' ? false : true} 
           isResizable={viewMode === 'free'} 
           isDraggable={true}
           onLayoutChange={handleLayoutChange}
           onDragStart={handleDragStart}
+          onDrag={handleDrag}
           onDragStop={handleDragStop}
           droppingItem={{ i: 'placeholder', w: currentSpecs.w, h: currentSpecs.h }} 
           draggableHandle=".drag-handle"
+          allowOverlap={viewMode === 'structured'}
+          verticalCompact={false}
         >
           {items.map((item) => {
              const theme = THEMES[item.themeIndex || 0] || THEMES[0];
