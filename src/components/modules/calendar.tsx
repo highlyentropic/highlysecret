@@ -6,11 +6,12 @@ import type { CalendarEvent } from '../../types';
 interface CalendarProps {
   events: CalendarEvent[];
   onDayClick: (date: Date) => void;
+  backgroundColor?: string;
 }
 
 type ViewType = 'month' | 'week' | 'day';
 
-export const Calendar: React.FC<CalendarProps> = ({ events, onDayClick }) => {
+export const Calendar: React.FC<CalendarProps> = ({ events, onDayClick, backgroundColor = 'white' }) => {
   const [viewDate, setViewDate] = useState(new Date());
   const [viewType, setViewType] = useState<ViewType>('month');
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -34,7 +35,7 @@ export const Calendar: React.FC<CalendarProps> = ({ events, onDayClick }) => {
   const zoomOut = () => setHourHeight(prev => Math.max(20, prev - 10));
 
   return (
-    <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', background: 'white', position: 'relative' }}>
+    <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', background: backgroundColor, position: 'relative' }}>
       
       {/* HEADER TOOLBAR - Scaled Compactly */}
       <div className="calendar-header">

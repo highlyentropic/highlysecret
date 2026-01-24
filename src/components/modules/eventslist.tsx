@@ -6,6 +6,7 @@ interface EventsListProps {
   events: CalendarEvent[];
   onAddClick: () => void;
   onToggleNotify: (id: string) => void;
+  backgroundColor?: string;
 }
 
 export const EventsList: React.FC<EventsListProps> = ({ events, onAddClick, onToggleNotify }) => {
@@ -20,7 +21,7 @@ export const EventsList: React.FC<EventsListProps> = ({ events, onAddClick, onTo
   });
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'white', padding: '15px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: backgroundColor, padding: '15px' }}>
       
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>

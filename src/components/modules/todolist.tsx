@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { FaCheck, FaStickyNote, FaPlus } from 'react-icons/fa';
 import type { TodoItem, CalendarEvent } from '../../types';
+import { getImageUrl } from '../../utils/imageUtils';
 
 interface TodoListProps {
   moduleId: string;
@@ -107,6 +108,13 @@ export const TodoList: React.FC<TodoListProps> = ({
       const solidColor = item.color || '#333';
       const isHovered = hoveredItemId === item.id;
       const isAddingSub = addingSubItemTo === item.id;
+      
+      // Determine cover image logic
+      const images = item.images || [];
+      const coverImage = images.length === 1 
+          ? images[0] 
+          : images.find(img => img.isCover);
+      const hasCoverImage = coverImage !== undefined;
 
       return (
           <div 
@@ -134,7 +142,10 @@ export const TodoList: React.FC<TodoListProps> = ({
                 style={{ 
                     backgroundColor: bgColor,
                     borderColor: `${solidColor}40`,
-                    marginLeft: '0px'
+                    marginLeft: '0px',
+                    flexDirection: hasCoverImage ? 'column' : 'row',
+                    alignItems: hasCoverImage ? 'flex-start' : 'center',
+                    padding: hasCoverImage ? '8px' : '6px 8px'
                 }}
                 draggable
                 onDragStart={(e) => handleDragStart(e, item)}
@@ -142,24 +153,56 @@ export const TodoList: React.FC<TodoListProps> = ({
                 onClick={() => onEditTodo(item)}
                 onMouseDown={(e) => e.stopPropagation()} 
             >
-                <div 
-                    onClick={(e) => { e.stopPropagation(); onUpdateTodo(item.id, { done: !item.done }); }}
-                    style={{ 
-                        cursor: 'pointer', marginRight: '8px', 
-                        color: item.done ? '#28a745' : solidColor,
-                        display: 'flex', alignItems: 'center'
-                    }}
-                >
-                    <FaCheck size={12} />
+                <div style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
+                    <div 
+                        onClick={(e) => { e.stopPropagation(); onUpdateTodo(item.id, { done: !item.done }); }}
+                        style={{ 
+                            cursor: 'pointer', marginRight: '8px', 
+                            color: item.done ? '#28a745' : solidColor,
+                            display: 'flex', alignItems: 'center',
+                            flexShrink: 0
+                        }}
+                    >
+                        <FaCheck size={12} />
+                    </div>
+
+                    <span className={`todo-text ${item.done ? 'done' : ''}`} style={{ color: '#333', flex: 1 }}>
+                        {item.text}
+                    </span>
+
+                    {hasDesc && (
+                        <div title="Has description" style={{ marginLeft: 'auto', color: solidColor, opacity: 0.7, flexShrink: 0 }}>
+                            <FaStickyNote size={12} />
+                        </div>
+                    )}
                 </div>
-
-                <span className={`todo-text ${item.done ? 'done' : ''}`} style={{ color: '#333' }}>
-                    {item.text}
-                </span>
-
-                {hasDesc && (
-                    <div title="Has description" style={{ marginLeft: 'auto', color: solidColor, opacity: 0.7 }}>
-                        <FaStickyNote size={12} />
+                
+                {/* Cover Image Preview */}
+                {hasCoverImage && coverImage && (
+                    <div 
+                        style={{ 
+                            width: '100%', 
+                            marginTop: '8px',
+                            borderRadius: '4px',
+                            overflow: 'hidden',
+                            border: `1px solid ${solidColor}40`
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <img 
+                            src={getImageUrl(coverImage.path)} 
+                            alt="Cover" 
+                            style={{ 
+                                width: '100%', 
+                                maxHeight: '150px', 
+                                objectFit: 'cover',
+                                display: 'block'
+                            }}
+                            onError={(e) => {
+                                console.error('Failed to load image:', coverImage.path);
+                                (e.target as HTMLImageElement).style.display = 'none';
+                            }}
+                        />
                     </div>
                 )}
             </div>
@@ -219,7 +262,7 @@ export const TodoList: React.FC<TodoListProps> = ({
     >
       
       {/* List */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '10px', minHeight: 0 }}>
+      <div style={{ flex: 1, overflowY: 'visible', padding: '10px', minHeight: 0 }}>
         {rootItems.map(item => renderTodoItem(item))}
 
         {/* Root Add Input */}

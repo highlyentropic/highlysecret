@@ -34,6 +34,7 @@ Thumbs.db
 .vscode
 *.swp
 *.swo
+.cursorrules
 
 # Testing
 coverage
@@ -41,3 +42,4 @@ coverage
 
 # Electron-specific (if you use electron-builder)
 dist_electron
+prod-app.code-workspace

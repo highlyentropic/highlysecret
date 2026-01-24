@@ -19,4 +19,5 @@ export interface TodoItem {
   color?: string; 
   originModuleId: string; 
   parentId?: string;
+  images?: Array<{ id: string; path: string; isCover?: boolean }>;
 }

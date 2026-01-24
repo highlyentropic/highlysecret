@@ -1,4 +1,4 @@
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
 
 const createWindow = () => {
@@ -31,6 +31,22 @@ app.whenReady().then(() => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+});
+
+// IPC handlers for image file selection
+ipcMain.handle('open-image-dialog', async () => {
+  const result = await dialog.showOpenDialog({
+    properties: ['openFile'],
+    filters: [
+      { name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'] }
+    ]
+  });
+  
+  if (!result.canceled && result.filePaths && result.filePaths.length > 0) {
+    return result.filePaths[0];
+  }
+  
+  return null;
 });
 
 app.on('window-all-closed', () => {

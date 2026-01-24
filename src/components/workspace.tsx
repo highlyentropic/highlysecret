@@ -1,6 +1,25 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import RGL, { WidthProvider, Layout } from 'react-grid-layout';
 import Holidays from 'date-holidays';
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragOverlay,
+  type DragEndEvent,
+  type DragStartEvent,
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  horizontalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { Notepad } from './modules/notepad';
 import { Clock } from './modules/clock';
 import { Whiteboard } from './modules/whiteboard';
@@ -9,8 +28,13 @@ import { TodoList } from './modules/todolist';
 import { EventsList } from './modules/eventslist';
 import { Planner } from './modules/planner';
 import type { CalendarEvent, TodoItem } from '../types';
+import { copyImage, removeImage, openImageFileDialog, getImageUrl } from '../utils/imageUtils';
+
+// For path.basename in modal
+declare const require: any;
+const path = require('path');
 import { StickyNote } from './modules/stickynote'; 
-import { FaRegStickyNote, FaRegClock, FaPencilAlt, FaCalendarAlt, FaCheckSquare, FaList, FaTrash, FaPalette, FaExclamationTriangle, FaMinus, FaTasks, FaTh, FaExpand } from 'react-icons/fa';
+import { FaRegStickyNote, FaRegClock, FaPencilAlt, FaCalendarAlt, FaCheckSquare, FaList, FaTrash, FaPalette, FaExclamationTriangle, FaMinus, FaTasks, FaTh, FaExpand, FaImage, FaTimes, FaStar } from 'react-icons/fa';
 
 const ReactGridLayout = WidthProvider(RGL);
 
@@ -68,6 +92,8 @@ interface ModuleItem {
   themeIndex?: number;
   // Minimization support
   prevPos?: { x: number, y: number, w: number, h: number };
+  // Structured mode ordering
+  orderIndex?: number;
 }
 
 const loadState = <T,>(key: string, defaultVal: T): T => {
@@ -88,6 +114,261 @@ const MODULE_ICONS = {
     stickynote: FaRegStickyNote,
     events: FaList,
     planner: FaTasks
+};
+
+// Module width constants for structured mode
+const STRUCTURED_MODULE_WIDTHS: Record<ModuleType, number> = {
+  notepad: 320,
+  clock: 200,
+  whiteboard: 400,
+  calendar: 300,
+  todo: 300,
+  stickynote: 200,
+  events: 350,
+  planner: 380
+};
+
+// SortableModule component for structured mode
+interface SortableModuleProps {
+  item: ModuleItem;
+  theme: typeof THEMES[0];
+  editingTitleId: string | null;
+  setEditingTitleId: (id: string | null) => void;
+  updateContent: (id: string, data: Partial<ModuleItem>) => void;
+  paletteOpenId: string | null;
+  setPaletteOpenId: (id: string | null) => void;
+  minimizeModule: (id: string) => void;
+  requestDelete: (id: string) => void;
+  getVisibleTodos: (module: ModuleItem) => TodoItem[];
+  allEvents: CalendarEvent[];
+  globalTodos: TodoItem[];
+  addTodo: (text: string, moduleId: string, parentId?: string) => void;
+  updateTodo: (id: string, updates: Partial<TodoItem>) => void;
+  setEditingTodo: (todo: TodoItem | null) => void;
+  deleteTodo: (id: string) => Promise<void>;
+  moveTodo: (itemId: string, targetModuleId: string) => void;
+  reorderTodo: (draggedId: string, targetId: string | null, position: 'before' | 'after' | 'inside', moduleId: string) => void;
+  handleEditEvent: (event: CalendarEvent) => void;
+  openAddEventModal: (date?: Date) => void;
+  setGlobalEvents: React.Dispatch<React.SetStateAction<CalendarEvent[]>>;
+  maxRows: number;
+  rowHeight: number;
+  viewMode: 'free' | 'structured';
+  todoModuleRefs: React.MutableRefObject<Map<string, HTMLDivElement>>;
+  onHeightChange?: (moduleId: string, height: number) => void;
+}
+
+const SortableModule: React.FC<SortableModuleProps & { id: string }> = ({ id, ...props }) => {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  const { item, theme, maxRows, rowHeight, viewMode, todoModuleRefs, onHeightChange } = props;
+  
+  // State to track measured height for todo modules
+  const [measuredHeight, setMeasuredHeight] = useState<number | null>(null);
+  
+  // Calculate module height
+  const moduleHeight = item.type === 'todo' && viewMode === 'structured' && measuredHeight !== null
+    ? Math.min(measuredHeight, maxRows * rowHeight)
+    : item.type === 'todo' && viewMode === 'structured'
+    ? 'auto' // Use auto initially until measured
+    : (item.h * rowHeight);
+  
+  // Calculate module width
+  const moduleWidth = STRUCTURED_MODULE_WIDTHS[item.type] || 300;
+
+  // Effect to measure todo module height
+  useEffect(() => {
+    if (item.type === 'todo' && viewMode === 'structured') {
+      const ref = todoModuleRefs.current.get(item.i);
+      if (ref && onHeightChange) {
+        // Initial measurement
+        const measure = () => {
+          // Use requestAnimationFrame to ensure content is rendered
+          requestAnimationFrame(() => {
+            const height = ref.scrollHeight;
+            const maxHeight = maxRows * rowHeight;
+            const finalHeight = Math.min(height, maxHeight);
+            setMeasuredHeight(finalHeight);
+            onHeightChange(item.i, finalHeight);
+          });
+        };
+        
+        // Measure after a short delay to ensure content is rendered
+        const timeoutId = setTimeout(measure, 0);
+        
+        // Set up ResizeObserver for changes
+        const resizeObserver = new ResizeObserver(() => {
+          measure();
+        });
+        resizeObserver.observe(ref);
+        return () => {
+          clearTimeout(timeoutId);
+          resizeObserver.disconnect();
+        };
+      }
+    } else {
+      setMeasuredHeight(null);
+    }
+  }, [item.type, item.i, viewMode, maxRows, rowHeight, onHeightChange, props.globalTodos.length]);
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        ...style,
+        width: `${moduleWidth}px`,
+        height: typeof moduleHeight === 'string' ? moduleHeight : `${moduleHeight}px`,
+        flexShrink: 0,
+        marginRight: '16px',
+      }}
+    >
+      <div
+        className="grid-item"
+        style={{
+          width: '100%',
+          height: item.type === 'todo' && viewMode === 'structured' ? 'auto' : '100%',
+          display: 'flex',
+          flexDirection: 'column',
+          background: 'white',
+          border: '1px solid #ddd',
+          borderRadius: '4px',
+          overflow: item.type === 'todo' && viewMode === 'structured' ? 'visible' : 'hidden',
+        }}
+        ref={(el) => {
+          if (item.type === 'todo' && el) {
+            todoModuleRefs.current.set(item.i, el);
+          }
+        }}
+      >
+        <div 
+          className="drag-handle" 
+          style={{ 
+            background: theme.header,
+            padding: '4px 8px',
+            display: 'flex',
+            alignItems: 'center',
+            cursor: 'grab',
+            userSelect: 'none',
+            minHeight: '24px'
+          }}
+          {...attributes}
+          {...listeners}
+        >
+          {props.editingTitleId === item.i ? (
+            <input 
+              type="text" 
+              autoFocus 
+              defaultValue={item.title || item.type} 
+              onBlur={(e) => { props.updateContent(item.i, { title: e.target.value }); props.setEditingTitleId(null); }} 
+              onKeyDown={(e) => { if(e.key === 'Enter') { props.updateContent(item.i, { title: e.currentTarget.value }); props.setEditingTitleId(null); } }} 
+              style={{ height: '18px', fontSize: '11px', border: '1px solid #007bff', color: '#333', background: 'white', flex: 1 }} 
+              onMouseDown={(e) => e.stopPropagation()} 
+            />
+          ) : ( 
+            <span 
+              className="module-title" 
+              onClick={(e) => { e.stopPropagation(); props.setEditingTitleId(item.i); }}
+              style={{ cursor: 'text', flex: 1 }}
+            >
+              {item.title || item.type}
+            </span> 
+          )}
+          
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: '5px' }}>
+            {(item.type === 'todo' || item.type === 'notepad' || item.type === 'planner' || item.type === 'calendar' || item.type === 'events') && (
+              <div style={{ position: 'relative' }} onMouseDown={(e) => e.stopPropagation()}>
+                <span className="close-btn" style={{ fontSize: '12px' }} onClick={(e) => { e.stopPropagation(); props.setPaletteOpenId(props.paletteOpenId === item.i ? null : item.i); }}>
+                  <FaPalette />
+                </span>
+                {props.paletteOpenId === item.i && (
+                  <div style={{ 
+                    position: 'absolute', top: '20px', right: 0, 
+                    background: 'white', border: '1px solid #ccc', padding: '5px', 
+                    zIndex: 9999, display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '4px',
+                    boxShadow: '0 2px 10px rgba(0,0,0,0.2)', width: '100px'
+                  }}>
+                    {THEMES.map((t, idx) => (
+                      <div 
+                        key={t.name}
+                        onClick={() => props.updateContent(item.i, { themeIndex: idx })}
+                        title={t.name}
+                        style={{
+                          width: '20px', height: '20px', borderRadius: '3px',
+                          background: t.header, border: '1px solid #ddd', cursor: 'pointer'
+                        }}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            <span 
+              className="close-btn" 
+              onMouseDown={(e) => e.stopPropagation()} 
+              onClick={() => props.minimizeModule(item.i)}
+              title="Minimize"
+            >
+              <FaMinus size={10} />
+            </span>
+            <span className="close-btn" onMouseDown={(e) => e.stopPropagation()} onClick={() => props.requestDelete(item.i)}>✖</span>
+          </div>
+        </div>
+        
+        <div className="module-content" style={{ 
+          overflow: item.type === 'todo' && viewMode === 'structured' ? 'visible' : 'auto', 
+          flex: item.type === 'todo' && viewMode === 'structured' ? '0 1 auto' : 1, 
+          position: 'relative', 
+          height: item.type === 'todo' && viewMode === 'structured' ? 'auto' : '100%',
+          minHeight: item.type === 'todo' && viewMode === 'structured' ? 'auto' : 0
+        }}>
+          {item.type === 'notepad' && (
+            <Notepad 
+              content={item.content || ''} 
+              onChange={(txt) => props.updateContent(item.i, { content: txt })}
+              allEvents={props.allEvents}
+              onEditEvent={props.handleEditEvent}
+              backgroundColor={theme.body}
+            />
+          )}
+          {item.type === 'clock' && <Clock mode={item.clockMode || 'analog'} onToggleMode={() => props.updateContent(item.i, { clockMode: item.clockMode === 'analog' ? 'digital' : 'analog' })} />}
+          {item.type === 'whiteboard' && <Whiteboard content={item.content || ''} onChange={(data) => props.updateContent(item.i, { content: data })} />}
+          
+          {item.type === 'todo' && (
+            <TodoList 
+              moduleId={item.i} 
+              items={props.getVisibleTodos(item)} 
+              allEvents={props.allEvents} 
+              backgroundColor={theme.body}
+              onAddTodo={(text, parentId) => props.addTodo(text, item.i, parentId)} 
+              onUpdateTodo={props.updateTodo} 
+              onEditTodo={(todo) => props.setEditingTodo(todo)}
+              onDeleteTodo={props.deleteTodo} 
+              onMoveTodo={props.moveTodo} 
+              onReorderTodo={(dragId, targetId, pos) => props.reorderTodo(dragId, targetId, pos, item.i)}
+            />
+          )}
+          
+          {item.type === 'stickynote' && <StickyNote content={item.content || ''} onChange={(txt) => props.updateContent(item.i, { content: txt })} />}
+          {item.type === 'events' && <EventsList events={props.allEvents} onAddClick={() => props.openAddEventModal()} onToggleNotify={(id) => props.setGlobalEvents(prev => prev.map(e => e.id === id ? { ...e, notify: !e.notify } : e))} backgroundColor={theme.body} />}
+          {item.type === 'calendar' && <Calendar events={props.allEvents} onDayClick={(date) => props.openAddEventModal(date)} backgroundColor={theme.body} />}
+          {item.type === 'planner' && <Planner content={item.content || ''} onChange={(data) => props.updateContent(item.i, { content: data })} bgColor={theme.body} />}
+        </div>
+      </div>
+    </div>
+  );
 };
 
 export const Workspace = () => {
@@ -156,6 +437,22 @@ export const Workspace = () => {
   const [isDragging, setIsDragging] = useState(false);
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
   
+  // @dnd-kit state for structured mode
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8, // Require 8px of movement before drag starts
+      },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+  
+  // Refs for measuring todo module heights
+  const todoModuleRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  
   // Modals
   const [showModal, setShowModal] = useState(false);
   const [modalData, setModalData] = useState<Partial<CalendarEvent>>({});
@@ -170,19 +467,11 @@ export const Workspace = () => {
         setGridHeight(h);
         const newMaxRows = Math.floor(h / ROW_HEIGHT);
         setMaxRows(newMaxRows);
-        
-        // If in structured view, update all module heights
-        if (viewMode === 'structured') {
-            setItems(prevItems => prevItems.map(item => ({
-                ...item,
-                h: newMaxRows
-            })));
-        }
     };
     handleResize(); 
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
-  }, [viewMode]);
+  }, []);
 
   useEffect(() => {
       const clickHandler = () => setPaletteOpenId(null);
@@ -190,11 +479,61 @@ export const Workspace = () => {
       return () => window.removeEventListener('click', clickHandler);
   }, []);
 
-  // Calculate structured layout: group by type and stack horizontally
+  // Sync editingTodo with globalTodos when it changes (only for image updates)
+  useEffect(() => {
+      if (editingTodo) {
+          const updatedTodo = globalTodos.find(t => t.id === editingTodo.id);
+          if (updatedTodo) {
+              // Only update if images have changed to avoid unnecessary re-renders
+              const imagesChanged = JSON.stringify(updatedTodo.images || []) !== JSON.stringify(editingTodo.images || []);
+              if (imagesChanged) {
+                  setEditingTodo(updatedTodo);
+              }
+          }
+      }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [globalTodos]);
+
+  // Recalculate todo module heights when todos change (for structured mode)
+  useEffect(() => {
+    if (viewMode === 'structured') {
+      // Trigger height recalculation by accessing refs
+      // The ResizeObserver in SortableModule will handle the actual measurement
+      todoModuleRefs.current.forEach((ref, moduleId) => {
+        if (ref) {
+          // Force a re-measurement by accessing scrollHeight
+          const height = ref.scrollHeight;
+          const maxHeight = maxRows * ROW_HEIGHT;
+          const finalHeight = Math.min(height, maxHeight);
+          if (finalHeight > 0) {
+            handleTodoHeightChange(moduleId, finalHeight);
+          }
+        }
+      });
+    }
+  }, [globalTodos, viewMode, maxRows]);
+
+
+  // Calculate structured layout: group by type and assign orderIndex
   const calculateStructuredLayout = (modules: ModuleItem[]): ModuleItem[] => {
     if (modules.length === 0) return [];
     
-    // Group by type
+    // If modules already have orderIndex, preserve their order
+    const hasOrderIndex = modules.some(m => m.orderIndex !== undefined);
+    if (hasOrderIndex) {
+      // Sort by orderIndex, then assign new indices
+      const sorted = [...modules].sort((a, b) => {
+        const aOrder = a.orderIndex ?? 999999;
+        const bOrder = b.orderIndex ?? 999999;
+        return aOrder - bOrder;
+      });
+      return sorted.map((mod, index) => ({
+        ...mod,
+        orderIndex: index
+      }));
+    }
+    
+    // Group by type for initial layout
     const grouped = modules.reduce((acc, mod) => {
       if (!acc[mod.type]) acc[mod.type] = [];
       acc[mod.type].push(mod);
@@ -205,24 +544,33 @@ export const Workspace = () => {
     const typeOrder: ModuleType[] = ['notepad', 'stickynote', 'whiteboard', 'todo', 'planner', 'calendar', 'events', 'clock'];
     const sortedTypes = typeOrder.filter(t => grouped[t]);
     
-    // Stack horizontally
-    let currentX = 0;
+    // Assign orderIndex based on grouped order
+    let orderIndex = 0;
     const result: ModuleItem[] = [];
     
     sortedTypes.forEach(type => {
       grouped[type].forEach(mod => {
         result.push({
           ...mod,
-          x: currentX,
-          y: 0,
-          w: 16,
-          h: maxRows
+          orderIndex: orderIndex++
         });
-        currentX += 16;
       });
     });
     
     return result;
+  };
+  
+  // Get sorted items by orderIndex for structured mode
+  const getSortedItems = (): ModuleItem[] => {
+    // Filter out duplicates by ID, keeping the first occurrence
+    const uniqueItems = items.filter((item, index, self) => 
+      index === self.findIndex(i => i.i === item.i)
+    );
+    return uniqueItems.sort((a, b) => {
+      const aOrder = a.orderIndex ?? 999999;
+      const bOrder = b.orderIndex ?? 999999;
+      return aOrder - bOrder;
+    });
   };
 
   // Toggle view mode
@@ -237,40 +585,52 @@ export const Workspace = () => {
     let newItems = loadState<ModuleItem[]>(`ws_items_${newMode}`, []);
     const newMinimizedItems = loadState<ModuleItem[]>(`ws_minimized_${newMode}`, []);
     
-    // Merge modules: combine items from both views, removing duplicates by ID
-    // This ensures modules added in one view appear in the other
+    // Merge modules: combine items from both views, prioritizing current view's properties
+    // This ensures modules added in one view appear in the other, and properties like themes are synced
     const currentItemIds = new Set(items.map(i => i.i));
     const newItemIds = new Set(newItems.map(i => i.i));
+    
+    // Create a map of current items for easy lookup
+    const currentItemsMap = new Map(items.map(i => [i.i, i]));
+    
+    // Merge: for items that exist in both views, use current view's properties (theme, content, etc.)
+    // but preserve the new view's position/size
+    const mergedItems = newItems.map(newItem => {
+      const currentItem = currentItemsMap.get(newItem.i);
+      if (currentItem) {
+        // Item exists in both views - merge properties, prioritizing current view's non-positional data
+        return {
+          ...newItem, // Start with new view's position/size
+          ...currentItem, // Override with current view's properties (theme, content, etc.)
+          x: newItem.x, // But keep new view's position
+          y: newItem.y,
+          w: newItem.w,
+          h: newItem.h
+        };
+      }
+      return newItem;
+    });
     
     // Add items from current view that don't exist in new view
     const itemsToAdd = items.filter(item => !newItemIds.has(item.i));
     
-    // Add items from new view that don't exist in current view
-    const itemsFromNew = newItems.filter(item => !currentItemIds.has(item.i));
-    
-    // Combine: start with new view's items, add missing ones from current view
-    const mergedItems = [...newItems, ...itemsToAdd];
-    
     // If switching to structured, calculate layout
     if (newMode === 'structured') {
-      const structuredItems = calculateStructuredLayout(mergedItems);
+      const allItems = [...mergedItems, ...itemsToAdd];
+      const structuredItems = calculateStructuredLayout(allItems);
       setItems(structuredItems);
     } else {
       // For free view, add new items at default positions
-      const itemsWithDefaults = mergedItems.map((item, index) => {
-        if (itemsToAdd.includes(item)) {
-          // New item from structured view - use default position
-          const spec = MODULE_SPECS[item.type];
-          return {
-            ...item,
-            x: (index % 10) * 16,
-            y: Math.floor(index / 10) * 12,
-            w: spec.w,
-            h: spec.h
-          };
-        }
-        return item;
-      });
+      const itemsWithDefaults = [...mergedItems, ...itemsToAdd.map((item, index) => {
+        const spec = MODULE_SPECS[item.type];
+        return {
+          ...item,
+          x: ((mergedItems.length + index) % 10) * 16,
+          y: Math.floor((mergedItems.length + index) / 10) * 12,
+          w: spec.w,
+          h: spec.h
+        };
+      })];
       setItems(itemsWithDefaults);
     }
     
@@ -303,17 +663,17 @@ export const Workspace = () => {
         const itemToRestore = minimizedItems.find(i => i.i === restoreId);
         if (itemToRestore) {
             if (viewMode === 'structured') {
-              // In structured view, add to end and recalculate
-              const restored = {
-                ...itemToRestore,
-                x: items.length * 16,
-                y: 0,
-                w: 16,
-                h: maxRows
-              };
-              const updatedItems = [...items, restored];
-              const structuredItems = calculateStructuredLayout(updatedItems);
-              setItems(structuredItems);
+              // In structured view, add to end with orderIndex (check for duplicates first)
+              if (!items.some(i => i.i === restoreId)) {
+                const maxOrderIndex = items.length > 0 
+                  ? Math.max(...items.map(i => i.orderIndex ?? 0))
+                  : -1;
+                const restored = {
+                  ...itemToRestore,
+                  orderIndex: maxOrderIndex + 1
+                };
+                setItems([...items, restored]);
+              }
             } else {
               // Free view: restore to dropped position
               const restored = { 
@@ -336,10 +696,9 @@ export const Workspace = () => {
               const otherRestored: ModuleItem = otherMode === 'structured' 
                 ? {
                     ...otherItemToRestore,
-                    x: otherItems.length * 16,
-                    y: 0,
-                    w: 16,
-                    h: maxRows
+                    orderIndex: otherItems.length > 0 
+                      ? Math.max(...otherItems.map(i => i.orderIndex ?? 0)) + 1
+                      : 0
                   }
                 : {
                     ...otherItemToRestore,
@@ -350,7 +709,7 @@ export const Workspace = () => {
                   };
               
               const updatedOtherItems = otherMode === 'structured'
-                ? calculateStructuredLayout([...otherItems, otherRestored])
+                ? [...otherItems, otherRestored]
                 : [...otherItems, otherRestored];
               
               localStorage.setItem(`ws_items_${otherMode}`, JSON.stringify(updatedOtherItems));
@@ -375,22 +734,26 @@ export const Workspace = () => {
 
     const newItem: ModuleItem = {
         i: uniqueId, 
-        x: viewMode === 'structured' ? items.length * 16 : layoutItem.x, 
+        x: viewMode === 'structured' ? 0 : layoutItem.x, 
         y: viewMode === 'structured' ? 0 : layoutItem.y, 
         w: viewMode === 'structured' ? 16 : specs.w, 
-        h: viewMode === 'structured' ? maxRows : specs.h, 
+        h: viewMode === 'structured' ? specs.h : specs.h, 
         type: draggingType,
-        title: defaultTitle, content: '', clockMode: 'analog', listTitle: '', themeIndex: 0
+        title: defaultTitle, content: '', clockMode: 'analog', listTitle: '', themeIndex: 0,
+        orderIndex: viewMode === 'structured' ? (items.length > 0 ? Math.max(...items.map(i => i.orderIndex ?? 0)) + 1 : 0) : undefined
     };
     
     // Add to current view
     if (viewMode === 'structured') {
-      // In structured view, add to end and recalculate layout
-      const updatedItems = [...items, newItem];
-      const structuredItems = calculateStructuredLayout(updatedItems);
-      setItems(structuredItems);
+      // In structured view, add to end (check for duplicates first)
+      if (!items.some(i => i.i === uniqueId)) {
+        setItems([...items, newItem]);
+      }
     } else {
-      setItems(prev => [...prev, newItem]);
+      setItems(prev => {
+        if (prev.some(i => i.i === uniqueId)) return prev;
+        return [...prev, newItem];
+      });
     }
     
     // Also add to the other view's storage (with appropriate positioning)
@@ -401,13 +764,16 @@ export const Workspace = () => {
     if (!otherItems.some(i => i.i === uniqueId)) {
       const otherViewItem: ModuleItem = {
         ...newItem,
-        x: otherMode === 'structured' ? otherItems.length * 16 : (otherItems.length % 10) * 16,
+        x: otherMode === 'structured' ? 0 : (otherItems.length % 10) * 16,
         y: otherMode === 'structured' ? 0 : Math.floor(otherItems.length / 10) * 12,
         w: otherMode === 'structured' ? 16 : specs.w,
-        h: otherMode === 'structured' ? maxRows : specs.h
+        h: otherMode === 'structured' ? specs.h : specs.h,
+        orderIndex: otherMode === 'structured' 
+          ? (otherItems.length > 0 ? Math.max(...otherItems.map(i => i.orderIndex ?? 0)) + 1 : 0)
+          : undefined
       };
       const updatedOtherItems = otherMode === 'structured' 
-        ? calculateStructuredLayout([...otherItems, otherViewItem])
+        ? [...otherItems, otherViewItem]
         : [...otherItems, otherViewItem];
       localStorage.setItem(`ws_items_${otherMode}`, JSON.stringify(updatedOtherItems));
     }
@@ -434,17 +800,19 @@ export const Workspace = () => {
       let restoredItem: ModuleItem;
       
       if (viewMode === 'structured') {
-        // In structured view, add to end and recalculate
-        restoredItem = {
-          ...item,
-          x: items.length * 16,
-          y: 0,
-          w: 16,
-          h: maxRows
-        };
-        const updatedItems = [...items, restoredItem];
-        const structuredItems = calculateStructuredLayout(updatedItems);
-        setItems(structuredItems);
+        // In structured view, add to end with orderIndex (check for duplicates first)
+        if (!items.some(i => i.i === id)) {
+          const maxOrderIndex = items.length > 0 
+            ? Math.max(...items.map(i => i.orderIndex ?? 0))
+            : -1;
+          restoredItem = {
+            ...item,
+            orderIndex: maxOrderIndex + 1
+          };
+          setItems([...items, restoredItem]);
+        } else {
+          return; // Item already exists, don't restore
+        }
       } else {
         // Free view: use saved position or provided drop position
         const newX = dropX !== undefined ? dropX : (item.prevPos?.x || 0);
@@ -470,10 +838,9 @@ export const Workspace = () => {
         const otherRestored: ModuleItem = otherMode === 'structured' 
           ? {
               ...otherItem,
-              x: otherItems.length * 16,
-              y: 0,
-              w: 16,
-              h: maxRows
+              orderIndex: otherItems.length > 0 
+                ? Math.max(...otherItems.map(i => i.orderIndex ?? 0)) + 1
+                : 0
             }
           : {
               ...otherItem,
@@ -484,7 +851,7 @@ export const Workspace = () => {
             };
         
         const updatedOtherItems = otherMode === 'structured'
-          ? calculateStructuredLayout([...otherItems, otherRestored])
+          ? [...otherItems.length > 0 ? otherItems : [], otherRestored]
           : [...otherItems, otherRestored];
         
         localStorage.setItem(`ws_items_${otherMode}`, JSON.stringify(updatedOtherItems));
@@ -525,6 +892,21 @@ export const Workspace = () => {
 
   const updateContent = (id: string, data: Partial<ModuleItem>) => {
     setItems(prev => prev.map(i => i.i === id ? { ...i, ...data } : i));
+    
+    // Sync theme changes (and other properties) to the other view
+    const otherMode: 'free' | 'structured' = viewMode === 'free' ? 'structured' : 'free';
+    const otherItems = loadState<ModuleItem[]>(`ws_items_${otherMode}`, []);
+    const updatedOtherItems = otherItems.map(i => i.i === id ? { ...i, ...data } : i);
+    localStorage.setItem(`ws_items_${otherMode}`, JSON.stringify(updatedOtherItems));
+    
+    // Also update minimized items in both views if needed
+    const currentMinimized = minimizedItems.find(i => i.i === id);
+    if (currentMinimized) {
+      setMinimizedItems(prev => prev.map(i => i.i === id ? { ...i, ...data } : i));
+    }
+    const otherMinimized = loadState<ModuleItem[]>(`ws_minimized_${otherMode}`, []);
+    const updatedOtherMinimized = otherMinimized.map(i => i.i === id ? { ...i, ...data } : i);
+    localStorage.setItem(`ws_minimized_${otherMode}`, JSON.stringify(updatedOtherMinimized));
   };
   
   // --- EVENT HANDLING ---
@@ -618,11 +1000,39 @@ export const Workspace = () => {
       }
   };
 
-  const deleteTodo = (id: string) => {
+  const deleteTodo = async (id: string) => {
       const getDescendants = (rootId: string, allItems: TodoItem[]): string[] => {
           const children = allItems.filter(i => i.parentId === rootId);
           return [...children.map(c => c.id), ...children.flatMap(c => getDescendants(c.id, allItems))];
       };
+      
+      // Clean up images for deleted todos
+      const todoToDelete = globalTodos.find(t => t.id === id);
+      if (todoToDelete && todoToDelete.images) {
+          for (const img of todoToDelete.images) {
+              try {
+                  await removeImage(img.path);
+              } catch (error) {
+                  console.error(`Error removing image ${img.path}:`, error);
+              }
+          }
+      }
+      
+      // Also clean up images for descendants
+      const descendants = getDescendants(id, globalTodos);
+      for (const descId of descendants) {
+          const descTodo = globalTodos.find(t => t.id === descId);
+          if (descTodo && descTodo.images) {
+              for (const img of descTodo.images) {
+                  try {
+                      await removeImage(img.path);
+                  } catch (error) {
+                      console.error(`Error removing image ${img.path}:`, error);
+                  }
+              }
+          }
+      }
+      
       setGlobalTodos(prev => {
           const toDelete = [id, ...getDescendants(id, prev)];
           return prev.filter(t => !toDelete.includes(t.id));
@@ -681,6 +1091,105 @@ export const Workspace = () => {
           }
 
           return newTodos;
+      });
+  };
+
+  // Image management handlers
+  const handleAddImage = async (todoId: string) => {
+      try {
+          console.log('Opening image file dialog...');
+          const filePath = await openImageFileDialog();
+          console.log('File path received:', filePath);
+          
+          if (!filePath) {
+              console.log('No file selected');
+              return;
+          }
+          
+          console.log('Copying image from:', filePath);
+          const imagePath = await copyImage(filePath, todoId);
+          console.log('Image copied to:', imagePath);
+          
+          // Verify the file exists
+          const fs = require('fs');
+          if (!fs.existsSync(imagePath)) {
+            throw new Error(`Image file was not created at: ${imagePath}`);
+          }
+          console.log('Image file verified to exist');
+          
+          const imageId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+          
+          setGlobalTodos(prev => {
+              const todo = prev.find(t => t.id === todoId);
+              if (!todo) {
+                  console.error('Todo not found:', todoId);
+                  return prev;
+              }
+              
+              const images = todo.images || [];
+              
+              const newImage = {
+                  id: imageId,
+                  path: imagePath,
+                  isCover: images.length === 0 // First image is cover by default
+              };
+              
+              console.log('Adding image to todo:', newImage);
+              return prev.map(t => 
+                  t.id === todoId 
+                      ? { ...t, images: [...images, newImage] }
+                      : t
+              );
+          });
+      } catch (error) {
+          console.error('Error adding image:', error);
+          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+          alert('Failed to add image: ' + errorMessage);
+      }
+  };
+
+  const handleRemoveImage = async (todoId: string, imageId: string, imagePath: string) => {
+      try {
+          await removeImage(imagePath);
+          
+          setGlobalTodos(prev => {
+              const todo = prev.find(t => t.id === todoId);
+              if (!todo) return prev;
+              
+              const images = (todo.images || []).filter(img => img.id !== imageId);
+              // If we removed the cover image and there are other images, set the first one as cover
+              const removedWasCover = todo.images?.find(img => img.id === imageId)?.isCover;
+              if (removedWasCover && images.length > 0) {
+                  images[0].isCover = true;
+              }
+              
+              return prev.map(t => 
+                  t.id === todoId 
+                      ? { ...t, images }
+                      : t
+              );
+          });
+      } catch (error) {
+          console.error('Error removing image:', error);
+          alert('Failed to remove image: ' + (error instanceof Error ? error.message : 'Unknown error'));
+      }
+  };
+
+  const handleSetCoverImage = (todoId: string, imageId: string) => {
+      setGlobalTodos(prev => {
+          const todo = prev.find(t => t.id === todoId);
+          if (!todo) return prev;
+          
+          const images = (todo.images || []).map(img => ({
+              ...img,
+              isCover: img.id === imageId
+          }));
+          
+          return prev.map(t => 
+              t.id === todoId 
+                  ? { ...t, images }
+                  : t
+          );
       });
   };
   
@@ -849,9 +1358,50 @@ export const Workspace = () => {
     }
   };
 
+  // @dnd-kit handlers for structured mode
+  const handleDragStartStructured = (event: DragStartEvent) => {
+    setActiveId(event.active.id as string);
+    setIsDragging(true);
+  };
+
+  const handleDragEndStructured = (event: DragEndEvent) => {
+    const { active, over } = event;
+    
+    if (over && active.id !== over.id) {
+      const sortedItems = getSortedItems();
+      const oldIndex = sortedItems.findIndex(item => item.i === active.id);
+      const newIndex = sortedItems.findIndex(item => item.i === over.id);
+      
+      const reordered = arrayMove(sortedItems, oldIndex, newIndex);
+      const updated = reordered.map((item, index) => ({
+        ...item,
+        orderIndex: index
+      }));
+      
+      setItems(updated);
+    }
+    
+    setActiveId(null);
+    setIsDragging(false);
+  };
+
+  // Handler for todo module height changes
+  const handleTodoHeightChange = (moduleId: string, height: number) => {
+    setItems(prevItems => prevItems.map(item => {
+      if (item.i === moduleId && item.type === 'todo') {
+        const gridHeight = Math.ceil(height / ROW_HEIGHT);
+        return { ...item, h: gridHeight };
+      }
+      return item;
+    }));
+  };
+
   const getVisibleTodos = (module: ModuleItem) => globalTodos.filter(t => t.originModuleId === module.i);
   const currentSpecs = MODULE_SPECS[draggingType];
   const hasClock = items.some(i => i.type === 'clock');
+  
+  // Get active dragged item for overlay
+  const activeItem = activeId ? items.find(item => item.i === activeId) : null;
 
   return (
     <div className="app-container" style={{ position: 'relative', height: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -859,13 +1409,13 @@ export const Workspace = () => {
       {/* TOOLBAR */}
       <div className="toolbar" style={{ height: TOOLBAR_HEIGHT, flexShrink: 0 }}>
         {([
-            { type: 'notepad', label: 'Notepad', Icon: FaRegStickyNote, color: '#007bff' },
-            { type: 'stickynote', label: 'Sticky', Icon: FaRegStickyNote, color: '#fdd835' },
-            { type: 'whiteboard', label: 'Whiteboard', Icon: FaPencilAlt, color: '#6610f2' },
-            { type: 'todo', label: 'To-Do', Icon: FaCheckSquare, color: '#e83e8c' },
-            { type: 'planner', label: 'Planner', Icon: FaTasks, color: '#20c997' },
-            { type: 'calendar', label: 'Calendar', Icon: FaCalendarAlt, color: '#fd7e14' },
-            { type: 'events', label: 'Events', Icon: FaList, color: '#17a2b8' },
+            { type: 'notepad', label: 'Notepad', Icon: FaRegStickyNote, color: '#007bff', disabled: false },
+            { type: 'stickynote', label: 'Sticky', Icon: FaRegStickyNote, color: '#fdd835', disabled: false },
+            { type: 'whiteboard', label: 'Whiteboard', Icon: FaPencilAlt, color: '#6610f2', disabled: false },
+            { type: 'todo', label: 'To-Do', Icon: FaCheckSquare, color: '#e83e8c', disabled: false },
+            { type: 'planner', label: 'Planner', Icon: FaTasks, color: '#20c997', disabled: false },
+            { type: 'calendar', label: 'Calendar', Icon: FaCalendarAlt, color: '#fd7e14', disabled: false },
+            { type: 'events', label: 'Events', Icon: FaList, color: '#17a2b8', disabled: false },
             { type: 'clock', label: 'Clock', Icon: FaRegClock, color: '#28a745', disabled: hasClock },
         ] as const).map(tool => (
              <div key={tool.type} className="droppable-element" draggable={!tool.disabled} unselectable="on" onDragStart={(e) => !tool.disabled && onDragStart(e, tool.type as ModuleType)} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', cursor: tool.disabled ? 'not-allowed' : 'grab', opacity: tool.disabled ? 0.3 : 1, padding: '5px', border: '1px solid #ccc', borderRadius: '5px', width: '60px' }}>
@@ -939,182 +1489,456 @@ export const Workspace = () => {
                     <div style={{flex: 1}}><label><FaPalette /> Color:</label><input type="color" value={editingTodo.color || '#333333'} onChange={(e) => { const val = e.target.value; setEditingTodo({...editingTodo, color: val}); updateTodo(editingTodo.id, { color: val }); }} /></div>
                 </div>
 
+                {/* Image Management Section */}
+                <div className="modal-row">
+                    <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px'}}>
+                        <label style={{display: 'flex', alignItems: 'center', gap: '6px'}}>
+                            <FaImage /> Images 
+                            {editingTodo.images && editingTodo.images.length > 0 && (
+                                <span style={{fontSize: '11px', color: '#666', fontWeight: 'normal'}}>
+                                    ({editingTodo.images.length})
+                                </span>
+                            )}
+                        </label>
+                        <button 
+                            onClick={async () => {
+                                try {
+                                    await handleAddImage(editingTodo.id);
+                                } catch (error) {
+                                    console.error('Error in handleAddImage:', error);
+                                }
+                            }}
+                            style={{
+                                background: '#007bff', 
+                                color: 'white', 
+                                border: 'none', 
+                                padding: '6px 12px', 
+                                borderRadius: '4px',
+                                cursor: 'pointer',
+                                fontSize: '12px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                fontWeight: '500'
+                            }}
+                        >
+                            <FaImage size={12} /> Add Image
+                        </button>
+                    </div>
+                    {editingTodo.images && editingTodo.images.length > 0 ? (
+                        <div style={{
+                            display: 'grid', 
+                            gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', 
+                            gap: '10px', 
+                            maxHeight: '300px', 
+                            overflowY: 'auto',
+                            padding: '8px',
+                            background: '#f8f9fa',
+                            borderRadius: '4px',
+                            border: '1px solid #e9ecef'
+                        }}>
+                            {editingTodo.images.map((img) => (
+                                <div 
+                                    key={img.id} 
+                                    style={{
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        padding: '8px',
+                                        border: `2px solid ${img.isCover ? '#ffc107' : '#ddd'}`,
+                                        borderRadius: '6px',
+                                        background: img.isCover ? '#fffbf0' : 'white',
+                                        position: 'relative',
+                                        transition: 'all 0.2s ease'
+                                    }}
+                                >
+                                    {/* Image Preview */}
+                                    <div style={{position: 'relative', width: '100%', paddingTop: '75%', marginBottom: '8px'}}>
+                                        <img 
+                                            src={getImageUrl(img.path)} 
+                                            alt="Todo image" 
+                                            style={{
+                                                position: 'absolute',
+                                                top: 0,
+                                                left: 0,
+                                                width: '100%',
+                                                height: '100%',
+                                                objectFit: 'cover',
+                                                borderRadius: '4px',
+                                                border: '1px solid #ddd'
+                                            }}
+                                            onError={(e) => {
+                                                console.error('Failed to load image:', img.path);
+                                                const target = e.target as HTMLImageElement;
+                                                target.style.display = 'none';
+                                                const parent = target.parentElement;
+                                                if (parent) {
+                                                    parent.innerHTML = '<div style="position:absolute;top:0;left:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:#f0f0f0;color:#999;font-size:11px;border-radius:4px;">Image not found</div>';
+                                                }
+                                            }}
+                                        />
+                                        {/* Cover Badge */}
+                                        {img.isCover && (
+                                            <div style={{
+                                                position: 'absolute',
+                                                top: '4px',
+                                                left: '4px',
+                                                background: '#ffc107',
+                                                color: '#333',
+                                                padding: '2px 6px',
+                                                borderRadius: '3px',
+                                                fontSize: '9px',
+                                                fontWeight: 'bold',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                gap: '3px'
+                                            }}>
+                                                <FaStar size={8} /> Cover
+                                            </div>
+                                        )}
+                                        {/* Remove Button */}
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                if (confirm('Remove this image?')) {
+                                                    handleRemoveImage(editingTodo.id, img.id, img.path);
+                                                }
+                                            }}
+                                            title="Remove image"
+                                            style={{
+                                                position: 'absolute',
+                                                top: '4px',
+                                                right: '4px',
+                                                background: 'rgba(220, 53, 69, 0.9)',
+                                                border: 'none',
+                                                color: 'white',
+                                                cursor: 'pointer',
+                                                padding: '4px',
+                                                borderRadius: '3px',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                width: '24px',
+                                                height: '24px'
+                                            }}
+                                        >
+                                            <FaTimes size={10} />
+                                        </button>
+                                    </div>
+                                    
+                                    {/* Image Info and Actions */}
+                                    <div style={{fontSize: '10px', color: '#666', marginBottom: '6px', wordBreak: 'break-all'}}>
+                                        {path.basename(img.path)}
+                                    </div>
+                                    
+                                    {/* Cover Toggle Button */}
+                                    {editingTodo.images && editingTodo.images.length > 1 && (
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleSetCoverImage(editingTodo.id, img.id);
+                                            }}
+                                            title={img.isCover ? "Currently cover image" : "Set as cover image"}
+                                            style={{
+                                                width: '100%',
+                                                background: img.isCover ? '#ffc107' : '#e9ecef',
+                                                border: `1px solid ${img.isCover ? '#ffc107' : '#ddd'}`,
+                                                borderRadius: '4px',
+                                                padding: '4px 8px',
+                                                cursor: 'pointer',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                gap: '4px',
+                                                fontSize: '10px',
+                                                fontWeight: img.isCover ? 'bold' : 'normal',
+                                                color: img.isCover ? '#333' : '#666',
+                                                transition: 'all 0.2s ease'
+                                            }}
+                                        >
+                                            <FaStar size={9} /> {img.isCover ? 'Cover' : 'Set Cover'}
+                                        </button>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        <div style={{
+                            padding: '20px',
+                            textAlign: 'center',
+                            color: '#999',
+                            fontSize: '12px',
+                            background: '#f8f9fa',
+                            borderRadius: '4px',
+                            border: '1px dashed #ddd'
+                        }}>
+                            No images added. Click "Add Image" to attach photos to this todo item.
+                        </div>
+                    )}
+                </div>
+
                 <div className="modal-actions"><button onClick={() => setEditingTodo(null)} style={{background: '#007bff', color: 'white', border: 'none', padding: '8px 15px', borderRadius: '4px'}}>Done</button></div>
             </div>
         </div>
       )}
 
-      {/* GRID */}
-      <div 
-        style={{ 
-          flex: 1, 
-          overflowX: viewMode === 'structured' ? 'auto' : 'auto',
-          overflowY: viewMode === 'structured' ? 'hidden' : 'auto',
-          position: 'relative', 
-          zIndex: 1
-        }}
-      >
-        <div
-          style={{
-            transform: isDragging && viewMode === 'structured' ? 'scale(0.75)' : 'scale(1)',
-            transformOrigin: 'center center',
-            transition: isDragging ? 'none' : 'transform 0.2s ease-out',
-            width: viewMode === 'structured' ? `${Math.max(1200, items.length * 16 * (1200 / COLS))}px` : '100%',
-            minWidth: viewMode === 'structured' ? `${Math.max(1200, items.length * 16 * (1200 / COLS))}px` : 'auto',
-            height: '100%'
+      {/* GRID / STRUCTURED MODE */}
+      {viewMode === 'free' ? (
+        // Free mode: Use ReactGridLayout
+        <div 
+          style={{ 
+            flex: 1, 
+            overflowX: 'auto',
+            overflowY: 'auto',
+            position: 'relative', 
+            zIndex: 1
           }}
-        > 
-        <ReactGridLayout 
-          className="layout" 
-          layout={items.map(i => { 
-            const spec = MODULE_SPECS[i.type]; 
-            return { 
-              i: i.i, 
-              x: i.x, 
-              y: viewMode === 'structured' ? 0 : i.y, 
-              w: i.w, 
-              h: i.h, 
-              minW: viewMode === 'structured' ? 16 : spec.minW, 
-              minH: viewMode === 'structured' ? maxRows : spec.minH,
-              maxW: viewMode === 'structured' ? 16 : undefined,
-              maxH: viewMode === 'structured' ? maxRows : undefined,
-              static: false
-            }; 
-          })} 
-          cols={COLS} 
-          rowHeight={ROW_HEIGHT} 
-          width={viewMode === 'structured' ? Math.max(1200, items.length * 16 * (1200 / COLS)) : 1200} 
-          margin={[0, 0]} 
-          style={{ height: gridHeight + 'px' }} 
-          isDroppable={true} 
-          onDrop={onDrop} 
-          isBounded={viewMode === 'structured' ? false : true} 
-          maxRows={viewMode === 'structured' ? 1 : maxRows} 
-          compactType={null} 
-          preventCollision={viewMode === 'structured' ? false : true} 
-          isResizable={viewMode === 'free'} 
-          isDraggable={true}
-          onLayoutChange={handleLayoutChange}
-          onDragStart={handleDragStart}
-          onDrag={handleDrag}
-          onDragStop={handleDragStop}
-          droppingItem={{ i: 'placeholder', w: currentSpecs.w, h: currentSpecs.h }} 
-          draggableHandle=".drag-handle"
-          allowOverlap={viewMode === 'structured'}
-          verticalCompact={false}
         >
-          {items.map((item) => {
-             const theme = THEMES[item.themeIndex || 0] || THEMES[0];
-             return (
-            <div key={item.i} className="grid-item">
-              <div 
-                className="drag-handle" 
-                style={{ background: theme.header }}
-              >
-                {editingTitleId === item.i ? (
-                    <input 
-                        type="text" 
-                        autoFocus 
-                        defaultValue={item.title || item.type} 
-                        onBlur={(e) => { updateContent(item.i, { title: e.target.value }); setEditingTitleId(null); }} 
-                        onKeyDown={(e) => { if(e.key === 'Enter') { updateContent(item.i, { title: e.currentTarget.value }); setEditingTitleId(null); } }} 
-                        style={{ height: '18px', fontSize: '11px', border: '1px solid #007bff', color: '#333', background: 'white' }} 
-                        onMouseDown={(e) => e.stopPropagation()} 
-                    />
-                ) : ( 
-                    <span 
-                        className="module-title" 
-                        onClick={(e) => { e.stopPropagation(); setEditingTitleId(item.i); }}
-                        style={{ cursor: 'text' }}
-                    >
-                        {item.title || item.type}
-                    </span> 
-                )}
-                
-                <div style={{ marginLeft: 'auto', display: 'flex', gap: '5px' }}>
-                    {item.type === 'todo' && (
-                        <div style={{ position: 'relative' }} onMouseDown={(e) => e.stopPropagation()}>
-                            <span className="close-btn" style={{ fontSize: '12px' }} onClick={(e) => { e.stopPropagation(); setPaletteOpenId(paletteOpenId === item.i ? null : item.i); }}>
-                                <FaPalette />
-                            </span>
-                            {paletteOpenId === item.i && (
-                                <div style={{ 
-                                    position: 'absolute', top: '20px', right: 0, 
-                                    background: 'white', border: '1px solid #ccc', padding: '5px', 
-                                    zIndex: 9999, display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '4px',
-                                    boxShadow: '0 2px 10px rgba(0,0,0,0.2)', width: '100px'
-                                }}>
-                                    {THEMES.map((t, idx) => (
-                                        <div 
-                                            key={t.name}
-                                            onClick={() => updateContent(item.i, { themeIndex: idx })}
-                                            title={t.name}
-                                            style={{
-                                                width: '20px', height: '20px', borderRadius: '3px',
-                                                background: t.header, border: '1px solid #ddd', cursor: 'pointer'
-                                            }}
-                                        />
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-                    )}
-                    {/* Minimize Button */}
-                    <span 
-                        className="close-btn" 
-                        onMouseDown={(e) => e.stopPropagation()} 
-                        onClick={() => minimizeModule(item.i)}
-                        title="Minimize"
-                    >
-                        <FaMinus size={10} />
-                    </span>
+          <ReactGridLayout 
+            className="layout" 
+            layout={items.map(i => { 
+              const spec = MODULE_SPECS[i.type]; 
+              return { 
+                i: i.i, 
+                x: i.x, 
+                y: i.y, 
+                w: i.w, 
+                h: i.h, 
+                minW: spec.minW, 
+                minH: spec.minH,
+                static: false
+              }; 
+            })} 
+            cols={COLS} 
+            rowHeight={ROW_HEIGHT} 
+            width={1200} 
+            margin={[0, 0]} 
+            style={{ height: gridHeight + 'px' }} 
+            isDroppable={true} 
+            onDrop={onDrop} 
+            isBounded={true} 
+            maxRows={maxRows} 
+            compactType={null} 
+            preventCollision={true} 
+            isResizable={true} 
+            isDraggable={true}
+            onLayoutChange={handleLayoutChange}
+            onDragStart={handleDragStart}
+            onDrag={handleDrag}
+            onDragStop={handleDragStop}
+            droppingItem={{ i: 'placeholder', w: currentSpecs.w, h: currentSpecs.h }} 
+            draggableHandle=".drag-handle"
+            verticalCompact={false}
+          >
+            {items.map((item) => {
+               const theme = THEMES[item.themeIndex || 0] || THEMES[0];
+               return (
+              <div key={item.i} className="grid-item">
+                <div 
+                  className="drag-handle" 
+                  style={{ background: theme.header }}
+                >
+                  {editingTitleId === item.i ? (
+                      <input 
+                          type="text" 
+                          autoFocus 
+                          defaultValue={item.title || item.type} 
+                          onBlur={(e) => { updateContent(item.i, { title: e.target.value }); setEditingTitleId(null); }} 
+                          onKeyDown={(e) => { if(e.key === 'Enter') { updateContent(item.i, { title: e.currentTarget.value }); setEditingTitleId(null); } }} 
+                          style={{ height: '18px', fontSize: '11px', border: '1px solid #007bff', color: '#333', background: 'white' }} 
+                          onMouseDown={(e) => e.stopPropagation()} 
+                      />
+                  ) : ( 
+                      <span 
+                          className="module-title" 
+                          onClick={(e) => { e.stopPropagation(); setEditingTitleId(item.i); }}
+                          style={{ cursor: 'text' }}
+                      >
+                          {item.title || item.type}
+                      </span> 
+                  )}
+                  
+                  <div style={{ marginLeft: 'auto', display: 'flex', gap: '5px' }}>
+                      {(item.type === 'todo' || item.type === 'notepad' || item.type === 'planner' || item.type === 'calendar' || item.type === 'events') && (
+                          <div style={{ position: 'relative' }} onMouseDown={(e) => e.stopPropagation()}>
+                              <span className="close-btn" style={{ fontSize: '12px' }} onClick={(e) => { e.stopPropagation(); setPaletteOpenId(paletteOpenId === item.i ? null : item.i); }}>
+                                  <FaPalette />
+                              </span>
+                              {paletteOpenId === item.i && (
+                                  <div style={{ 
+                                      position: 'absolute', top: '20px', right: 0, 
+                                      background: 'white', border: '1px solid #ccc', padding: '5px', 
+                                      zIndex: 9999, display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '4px',
+                                      boxShadow: '0 2px 10px rgba(0,0,0,0.2)', width: '100px'
+                                  }}>
+                                      {THEMES.map((t, idx) => (
+                                          <div 
+                                              key={t.name}
+                                              onClick={() => updateContent(item.i, { themeIndex: idx })}
+                                              title={t.name}
+                                              style={{
+                                                  width: '20px', height: '20px', borderRadius: '3px',
+                                                  background: t.header, border: '1px solid #ddd', cursor: 'pointer'
+                                              }}
+                                          />
+                                      ))}
+                                  </div>
+                              )}
+                          </div>
+                      )}
+                      {/* Minimize Button */}
+                      <span 
+                          className="close-btn" 
+                          onMouseDown={(e) => e.stopPropagation()} 
+                          onClick={() => minimizeModule(item.i)}
+                          title="Minimize"
+                      >
+                          <FaMinus size={10} />
+                      </span>
 
-                    <span className="close-btn" onMouseDown={(e) => e.stopPropagation()} onClick={() => requestDelete(item.i)}>✖</span>
+                      <span className="close-btn" onMouseDown={(e) => e.stopPropagation()} onClick={() => requestDelete(item.i)}>✖</span>
+                  </div>
+                </div>
+                
+                <div className="module-content" style={{ overflow: 'hidden', flex: 1, position: 'relative' }}>
+                  {item.type === 'notepad' && (
+                      <Notepad 
+                          content={item.content || ''} 
+                          onChange={(txt) => updateContent(item.i, { content: txt })}
+                          allEvents={allEvents}
+                          onEditEvent={handleEditEvent}
+                          backgroundColor={theme.body}
+                      />
+                  )}
+                  {item.type === 'clock' && <Clock mode={item.clockMode || 'analog'} onToggleMode={() => updateContent(item.i, { clockMode: item.clockMode === 'analog' ? 'digital' : 'analog' })} />}
+                  {item.type === 'whiteboard' && <Whiteboard content={item.content || ''} onChange={(data) => updateContent(item.i, { content: data })} />}
+                  
+                  {item.type === 'todo' && (
+                      <TodoList 
+                          moduleId={item.i} 
+                          items={getVisibleTodos(item)} 
+                          allEvents={allEvents} 
+                          backgroundColor={theme.body}
+                          onAddTodo={(text, parentId) => addTodo(text, item.i, parentId)} 
+                          onUpdateTodo={updateTodo} 
+                          onEditTodo={(todo) => setEditingTodo(todo)}
+                          onDeleteTodo={deleteTodo} 
+                          onMoveTodo={moveTodo} 
+                          onReorderTodo={(dragId, targetId, pos) => reorderTodo(dragId, targetId, pos, item.i)}
+                      />
+                  )}
+                  
+                  {item.type === 'stickynote' && <StickyNote content={item.content || ''} onChange={(txt) => updateContent(item.i, { content: txt })} />}
+                  {item.type === 'events' && <EventsList events={allEvents} onAddClick={() => openAddEventModal()} onToggleNotify={(id) => setGlobalEvents(prev => prev.map(e => e.id === id ? { ...e, notify: !e.notify } : e))} backgroundColor={theme.body} />}
+                  {item.type === 'calendar' && <Calendar events={allEvents} onDayClick={(date) => openAddEventModal(date)} backgroundColor={theme.body} />}
+                  {item.type === 'planner' && <Planner content={item.content || ''} onChange={(data) => updateContent(item.i, { content: data })} bgColor={theme.body} />}
                 </div>
               </div>
-              
-              <div className="module-content" style={{ overflow: 'hidden', flex: 1, position: 'relative' }}>
-                {item.type === 'notepad' && (
-                    <Notepad 
-                        content={item.content || ''} 
-                        onChange={(txt) => updateContent(item.i, { content: txt })}
-                        allTodos={globalTodos} // Pass Todos
-                        allEvents={allEvents}  // Pass Events
-                        onEditTodo={setEditingTodo}
-                        onEditEvent={handleEditEvent}
-                    />
-                )}
-                {item.type === 'clock' && <Clock mode={item.clockMode || 'analog'} onToggleMode={() => updateContent(item.i, { clockMode: item.clockMode === 'analog' ? 'digital' : 'analog' })} />}
-                {item.type === 'whiteboard' && <Whiteboard content={item.content || ''} onChange={(data) => updateContent(item.i, { content: data })} />}
-                
-                {item.type === 'todo' && (
-                    <TodoList 
-                        moduleId={item.i} 
-                        listTitle={item.listTitle || ''}
-                        items={getVisibleTodos(item)} 
-                        allEvents={allEvents} 
-                        backgroundColor={theme.body}
-                        onAddTodo={(text, parentId) => addTodo(text, item.i, parentId)} 
-                        onUpdateTodo={updateTodo} 
-                        onEditTodo={(todo) => setEditingTodo(todo)}
-                        onDeleteTodo={deleteTodo} 
-                        onUpdateListTitle={(t) => updateContent(item.i, { listTitle: t, title: t || 'To-Do' })}
-                        onMoveTodo={moveTodo} 
-                        onReorderTodo={(dragId, targetId, pos) => reorderTodo(dragId, targetId, pos, item.i)}
-                    />
-                )}
-                
-                {item.type === 'stickynote' && <StickyNote content={item.content || ''} onChange={(txt) => updateContent(item.i, { content: txt })} />}
-                {item.type === 'events' && <EventsList events={allEvents} onAddClick={() => openAddEventModal()} onToggleNotify={(id) => setGlobalEvents(prev => prev.map(e => e.id === id ? { ...e, notify: !e.notify } : e))} />}
-                {item.type === 'calendar' && <Calendar events={allEvents} onDayClick={(date) => openAddEventModal(date)} />}
-                {item.type === 'planner' && <Planner content={item.content || ''} onChange={(data) => updateContent(item.i, { content: data })} bgColor={theme.body} />}
-              </div>
-            </div>
-          );
-          })}
-        </ReactGridLayout>
+            );
+            })}
+          </ReactGridLayout>
         </div>
-      </div>
+      ) : (
+        // Structured mode: Use flexbox with @dnd-kit
+        <div 
+          style={{ 
+            flex: 1, 
+            overflowX: 'auto',
+            overflowY: 'hidden',
+            position: 'relative', 
+            zIndex: 1
+          }}
+        >
+          <div
+            style={{
+              transform: isDragging ? 'scale(0.75)' : 'scale(1)',
+              transformOrigin: 'center center',
+              transition: isDragging ? 'none' : 'transform 0.2s ease-out',
+              height: '100%',
+              padding: '16px'
+            }}
+          >
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragStart={handleDragStartStructured}
+              onDragEnd={handleDragEndStructured}
+            >
+              <SortableContext
+                items={getSortedItems().map(item => item.i)}
+                strategy={horizontalListSortingStrategy}
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'row',
+                    alignItems: 'flex-start',
+                    gap: '16px',
+                    height: '100%'
+                  }}
+                >
+                  {getSortedItems().map((item) => {
+                    const theme = THEMES[item.themeIndex || 0] || THEMES[0];
+                    return (
+                      <SortableModule
+                        key={item.i}
+                        id={item.i}
+                        item={item}
+                        theme={theme}
+                        editingTitleId={editingTitleId}
+                        setEditingTitleId={setEditingTitleId}
+                        updateContent={updateContent}
+                        paletteOpenId={paletteOpenId}
+                        setPaletteOpenId={setPaletteOpenId}
+                        minimizeModule={minimizeModule}
+                        requestDelete={requestDelete}
+                        getVisibleTodos={getVisibleTodos}
+                        allEvents={allEvents}
+                        globalTodos={globalTodos}
+                        addTodo={addTodo}
+                        updateTodo={updateTodo}
+                        setEditingTodo={setEditingTodo}
+                        deleteTodo={deleteTodo}
+                        moveTodo={moveTodo}
+                        reorderTodo={reorderTodo}
+                        handleEditEvent={handleEditEvent}
+                        openAddEventModal={openAddEventModal}
+                        setGlobalEvents={setGlobalEvents}
+                        maxRows={maxRows}
+                        rowHeight={ROW_HEIGHT}
+                        viewMode={viewMode}
+                        todoModuleRefs={todoModuleRefs}
+                        onHeightChange={handleTodoHeightChange}
+                      />
+                    );
+                  })}
+                </div>
+              </SortableContext>
+              <DragOverlay>
+                {activeItem ? (
+                  <div
+                    style={{
+                      width: `${STRUCTURED_MODULE_WIDTHS[activeItem.type] || 300}px`,
+                      height: `${activeItem.type === 'todo' ? Math.min((activeItem.h * ROW_HEIGHT), (maxRows * ROW_HEIGHT)) : (activeItem.h * ROW_HEIGHT)}px`,
+                      opacity: 0.8,
+                      background: 'white',
+                      border: '2px solid #007bff',
+                      borderRadius: '4px',
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '14px',
+                      color: '#666'
+                    }}
+                  >
+                    {activeItem.title || activeItem.type}
+                  </div>
+                ) : null}
+              </DragOverlay>
+            </DndContext>
+          </div>
+        </div>
+      )}
 
       {/* MINIMIZED BAR */}
       <div style={{ height: FOOTER_HEIGHT, background: '#f8f9fa', borderTop: '1px solid #ccc', display: 'flex', alignItems: 'center', padding: '0 10px', gap: '10px', overflowX: 'auto', zIndex: 100 }}>

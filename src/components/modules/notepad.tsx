@@ -142,10 +142,11 @@ interface NotepadProps {
     onChange: (text: string) => void;
     allEvents: CalendarEvent[];
     onEditEvent: (event: CalendarEvent) => void;
+    backgroundColor?: string;
 }
 
 export const Notepad: React.FC<NotepadProps> = ({ 
-    content, onChange, allEvents, onEditEvent 
+    content, onChange, allEvents, onEditEvent, backgroundColor = 'white'
 }) => {
   
   const [showTablePicker, setShowTablePicker] = useState(false);
@@ -290,7 +291,7 @@ export const Notepad: React.FC<NotepadProps> = ({
 
       <EditorContent 
         editor={editor} 
-        style={{ flex: 1, overflowY: 'auto', background: 'white', cursor: 'text', padding: '10px' }} 
+        style={{ flex: 1, overflowY: 'auto', background: backgroundColor, cursor: 'text', padding: '10px' }} 
       />
 
       <style>{`
