@@ -9,7 +9,7 @@ interface EventsListProps {
   backgroundColor?: string;
 }
 
-export const EventsList: React.FC<EventsListProps> = ({ events, onAddClick, onToggleNotify }) => {
+export const EventsList: React.FC<EventsListProps> = ({ events, onAddClick, onToggleNotify, backgroundColor }) => {
   // Sort events by date, then by time
   const sortedEvents = [...events].sort((a, b) => {
       const dateA = new Date(a.date).getTime();

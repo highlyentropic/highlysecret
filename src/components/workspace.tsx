@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import RGL, { WidthProvider, Layout } from 'react-grid-layout';
 import Holidays from 'date-holidays';
 import {
@@ -27,6 +27,7 @@ import { Calendar } from './modules/calendar';
 import { TodoList } from './modules/todolist';
 import { EventsList } from './modules/eventslist';
 import { Planner } from './modules/planner';
+import { PlannerCalendar } from './modules/plannerCalendar';
 import type { CalendarEvent, TodoItem } from '../types';
 import { copyImage, removeImage, openImageFileDialog, getImageUrl } from '../utils/imageUtils';
 
@@ -52,7 +53,8 @@ const MODULE_SPECS = {
     todo:       { w: 12, h: 8, minW: 12, minH: 8 },
     stickynote: { w: 8, h: 8, minW: 8, minH: 8, maxW: 8, maxH: 8 }, 
     events:     { w: 14, h: 14, minW: 10, minH: 10 },
-    planner:    { w: 16, h: 12, minW: 12, minH: 10 }
+    planner:    { w: 16, h: 12, minW: 12, minH: 10 },
+    plannerCalendar: { w: 16, h: 12, minW: 12, minH: 10 }
 };
 
 // 16 Themes (Header Color, Body Color)
@@ -75,7 +77,7 @@ const THEMES = [
     { name: 'Orange', header: 'rgba(255, 224, 178, 0.9)', body: 'rgba(255, 243, 224, 0.85)' },
 ];
 
-type ModuleType = 'notepad' | 'clock' | 'whiteboard' | 'calendar' | 'todo' | 'stickynote' | 'events' | 'planner';
+type ModuleType = 'notepad' | 'clock' | 'whiteboard' | 'calendar' | 'todo' | 'stickynote' | 'events' | 'planner' | 'plannerCalendar';
 
 interface ModuleItem {
   i: string;
@@ -113,7 +115,8 @@ const MODULE_ICONS = {
     todo: FaCheckSquare,
     stickynote: FaRegStickyNote,
     events: FaList,
-    planner: FaTasks
+    planner: FaTasks,
+    plannerCalendar: FaCalendarAlt
 };
 
 // Module width constants for structured mode
@@ -125,12 +128,14 @@ const STRUCTURED_MODULE_WIDTHS: Record<ModuleType, number> = {
   todo: 300,
   stickynote: 200,
   events: 350,
-  planner: 380
+  planner: 380,
+  plannerCalendar: 380
 };
 
 // SortableModule component for structured mode
 interface SortableModuleProps {
   item: ModuleItem;
+  allItems: ModuleItem[];
   theme: typeof THEMES[0];
   editingTitleId: string | null;
   setEditingTitleId: (id: string | null) => void;
@@ -365,6 +370,15 @@ const SortableModule: React.FC<SortableModuleProps & { id: string }> = ({ id, ..
           {item.type === 'events' && <EventsList events={props.allEvents} onAddClick={() => props.openAddEventModal()} onToggleNotify={(id) => props.setGlobalEvents(prev => prev.map(e => e.id === id ? { ...e, notify: !e.notify } : e))} backgroundColor={theme.body} />}
           {item.type === 'calendar' && <Calendar events={props.allEvents} onDayClick={(date) => props.openAddEventModal(date)} backgroundColor={theme.body} />}
           {item.type === 'planner' && <Planner content={item.content || ''} onChange={(data) => props.updateContent(item.i, { content: data })} bgColor={theme.body} />}
+          {item.type === 'plannerCalendar' && (
+            <PlannerCalendar
+              content={item.content || ''}
+              onChange={(data) => props.updateContent(item.i, { content: data })}
+              bgColor={theme.body}
+              planners={props.allItems.filter(i => i.type === 'planner').map(p => ({ id: p.i, title: p.title, content: p.content }))}
+              updatePlannerContent={(plannerId, newContent) => props.updateContent(plannerId, { content: newContent })}
+            />
+          )}
         </div>
       </div>
     </div>
@@ -401,6 +415,34 @@ export const Workspace = () => {
 
   // Save view mode
   useEffect(() => { localStorage.setItem('ws_viewMode', JSON.stringify(viewMode)); }, [viewMode]);
+  
+  // Deduplicate items - create a single source of truth for rendering
+  const uniqueItems = useMemo(() => {
+    const seen = new Set<string>();
+    const unique = items.filter(item => {
+      if (seen.has(item.i)) {
+        return false;
+      }
+      seen.add(item.i);
+      return true;
+    });
+    return unique;
+  }, [items]);
+  
+  // Clean up duplicates in state (only run once on mount and when explicitly needed)
+  // Don't run on every render to avoid interfering with new item additions
+  const hasCleanedUpRef = useRef(false);
+  useEffect(() => {
+    if (!hasCleanedUpRef.current) {
+      // One-time cleanup on mount
+      const itemIds = new Set(items.map(i => i.i));
+      if (itemIds.size < items.length) {
+        console.warn(`Removing ${items.length - itemIds.size} duplicate module(s) on mount`);
+        setItems(uniqueItems);
+      }
+      hasCleanedUpRef.current = true;
+    }
+  }, []); // Only run once on mount
   
   // Save view-specific items and minimized items
   useEffect(() => { localStorage.setItem(`ws_items_${viewMode}`, JSON.stringify(items)); }, [items, viewMode]);
@@ -516,13 +558,17 @@ export const Workspace = () => {
 
   // Calculate structured layout: group by type and assign orderIndex
   const calculateStructuredLayout = (modules: ModuleItem[]): ModuleItem[] => {
-    if (modules.length === 0) return [];
+    if (!modules || modules.length === 0) return [];
+    
+    // Filter out any invalid modules
+    const validModules = modules.filter(m => m && m.i && m.type);
+    if (validModules.length === 0) return [];
     
     // If modules already have orderIndex, preserve their order
-    const hasOrderIndex = modules.some(m => m.orderIndex !== undefined);
+    const hasOrderIndex = validModules.some(m => m.orderIndex !== undefined && m.orderIndex !== null);
     if (hasOrderIndex) {
       // Sort by orderIndex, then assign new indices
-      const sorted = [...modules].sort((a, b) => {
+      const sorted = [...validModules].sort((a, b) => {
         const aOrder = a.orderIndex ?? 999999;
         const bOrder = b.orderIndex ?? 999999;
         return aOrder - bOrder;
@@ -534,14 +580,14 @@ export const Workspace = () => {
     }
     
     // Group by type for initial layout
-    const grouped = modules.reduce((acc, mod) => {
+    const grouped = validModules.reduce((acc, mod) => {
       if (!acc[mod.type]) acc[mod.type] = [];
       acc[mod.type].push(mod);
       return acc;
     }, {} as Record<ModuleType, ModuleItem[]>);
     
     // Sort groups by type order (matching toolbar order)
-    const typeOrder: ModuleType[] = ['notepad', 'stickynote', 'whiteboard', 'todo', 'planner', 'calendar', 'events', 'clock'];
+    const typeOrder: ModuleType[] = ['notepad', 'stickynote', 'whiteboard', 'todo', 'planner', 'plannerCalendar', 'calendar', 'events', 'clock'];
     const sortedTypes = typeOrder.filter(t => grouped[t]);
     
     // Assign orderIndex based on grouped order
@@ -562,11 +608,9 @@ export const Workspace = () => {
   
   // Get sorted items by orderIndex for structured mode
   const getSortedItems = (): ModuleItem[] => {
-    // Filter out duplicates by ID, keeping the first occurrence
-    const uniqueItems = items.filter((item, index, self) => 
-      index === self.findIndex(i => i.i === item.i)
-    );
-    return uniqueItems.sort((a, b) => {
+    // Use the already-deduplicated uniqueItems
+    if (!uniqueItems || uniqueItems.length === 0) return [];
+    return [...uniqueItems].sort((a, b) => {
       const aOrder = a.orderIndex ?? 999999;
       const bOrder = b.orderIndex ?? 999999;
       return aOrder - bOrder;
@@ -587,7 +631,6 @@ export const Workspace = () => {
     
     // Merge modules: combine items from both views, prioritizing current view's properties
     // This ensures modules added in one view appear in the other, and properties like themes are synced
-    const currentItemIds = new Set(items.map(i => i.i));
     const newItemIds = new Set(newItems.map(i => i.i));
     
     // Create a map of current items for easy lookup
@@ -614,19 +657,38 @@ export const Workspace = () => {
     // Add items from current view that don't exist in new view
     const itemsToAdd = items.filter(item => !newItemIds.has(item.i));
     
+    // Deduplicate before setting items
+    const seen = new Set<string>();
+    const deduplicatedMerged = mergedItems.filter(item => {
+      if (seen.has(item.i)) {
+        console.warn(`Removing duplicate during view switch: ${item.i}`);
+        return false;
+      }
+      seen.add(item.i);
+      return true;
+    });
+    const deduplicatedToAdd = itemsToAdd.filter(item => {
+      if (seen.has(item.i)) {
+        console.warn(`Removing duplicate during view switch: ${item.i}`);
+        return false;
+      }
+      seen.add(item.i);
+      return true;
+    });
+    
     // If switching to structured, calculate layout
     if (newMode === 'structured') {
-      const allItems = [...mergedItems, ...itemsToAdd];
+      const allItems = [...deduplicatedMerged, ...deduplicatedToAdd];
       const structuredItems = calculateStructuredLayout(allItems);
       setItems(structuredItems);
     } else {
       // For free view, add new items at default positions
-      const itemsWithDefaults = [...mergedItems, ...itemsToAdd.map((item, index) => {
+      const itemsWithDefaults = [...deduplicatedMerged, ...deduplicatedToAdd.map((item, index) => {
         const spec = MODULE_SPECS[item.type];
         return {
           ...item,
-          x: ((mergedItems.length + index) % 10) * 16,
-          y: Math.floor((mergedItems.length + index) / 10) * 12,
+          x: ((deduplicatedMerged.length + index) % 10) * 16,
+          y: Math.floor((deduplicatedMerged.length + index) / 10) * 12,
           w: spec.w,
           h: spec.h
         };
@@ -643,6 +705,42 @@ export const Workspace = () => {
     e.dataTransfer.setData("moduleType", type); // Mark as module drag
     setDraggingType(type);
     setIsDropping(true);
+  };
+
+  const createStructuredModule = (type: ModuleType) => {
+    if (type === 'clock' && items.some(i => i.type === 'clock')) {
+      alert("Only one clock allowed!");
+      return;
+    }
+    if (type === 'planner' && items.some(i => i.type === 'planner')) {
+      alert("Only one planner allowed!");
+      return;
+    }
+
+    const specs = MODULE_SPECS[type];
+    const uniqueId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `mod_${Date.now()}`;
+    let defaultTitle = type.charAt(0).toUpperCase() + type.slice(1);
+    if (type === 'todo') defaultTitle = "To-do (click to edit)";
+    if (type === 'planner') defaultTitle = "Planner";
+    if (type === 'plannerCalendar') defaultTitle = "Planner Calendar";
+
+    const maxOrderIndex = items.length > 0 ? Math.max(...items.map(i => i.orderIndex ?? 0)) : -1;
+    const newItem: ModuleItem = {
+      i: uniqueId,
+      x: 0,
+      y: 0,
+      w: 16,
+      h: specs.h,
+      type,
+      title: defaultTitle,
+      content: '',
+      clockMode: 'analog',
+      listTitle: '',
+      themeIndex: 0,
+      orderIndex: maxOrderIndex + 1,
+    };
+
+    setItems(prev => [...prev, newItem]);
   };
 
   const onDrop = (layout: Layout[], layoutItem: Layout, event: Event) => {
@@ -675,15 +773,17 @@ export const Workspace = () => {
                 setItems([...items, restored]);
               }
             } else {
-              // Free view: restore to dropped position
-              const restored = { 
-                ...itemToRestore, 
-                x: layoutItem.x, 
-                y: layoutItem.y,
-                w: itemToRestore.prevPos?.w || itemToRestore.w,
-                h: itemToRestore.prevPos?.h || itemToRestore.h
-              };
-              setItems(prev => [...prev, restored]);
+              // Free view: restore to dropped position (check for duplicates first)
+              if (!items.some(i => i.i === restoreId)) {
+                const restored = { 
+                  ...itemToRestore, 
+                  x: layoutItem.x, 
+                  y: layoutItem.y,
+                  w: itemToRestore.prevPos?.w || itemToRestore.w,
+                  h: itemToRestore.prevPos?.h || itemToRestore.h
+                };
+                setItems(prev => [...prev, restored]);
+              }
             }
             setMinimizedItems(prev => prev.filter(i => i.i !== restoreId));
             
@@ -725,12 +825,18 @@ export const Workspace = () => {
         setIsDropping(false);
         return;
     }
+    if (draggingType === 'planner' && items.some(i => i.type === 'planner')) {
+        alert("Only one planner allowed!");
+        setIsDropping(false);
+        return;
+    }
     const specs = MODULE_SPECS[draggingType];
     const uniqueId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `mod_${Date.now()}`;
     
     let defaultTitle = draggingType.charAt(0).toUpperCase() + draggingType.slice(1);
     if (draggingType === 'todo') defaultTitle = "To-do (click to edit)";
     if (draggingType === 'planner') defaultTitle = "Planner";
+    if (draggingType === 'plannerCalendar') defaultTitle = "Planner Calendar";
 
     const newItem: ModuleItem = {
         i: uniqueId, 
@@ -740,7 +846,11 @@ export const Workspace = () => {
         h: viewMode === 'structured' ? specs.h : specs.h, 
         type: draggingType,
         title: defaultTitle, content: '', clockMode: 'analog', listTitle: '', themeIndex: 0,
-        orderIndex: viewMode === 'structured' ? (items.length > 0 ? Math.max(...items.map(i => i.orderIndex ?? 0)) + 1 : 0) : undefined
+        orderIndex: viewMode === 'structured' ? (() => {
+          if (items.length === 0) return 0;
+          const orderIndices = items.map(i => i.orderIndex ?? 0).filter(idx => idx >= 0);
+          return orderIndices.length > 0 ? Math.max(...orderIndices) + 1 : 0;
+        })() : undefined
     };
     
     // Add to current view
@@ -814,17 +924,21 @@ export const Workspace = () => {
           return; // Item already exists, don't restore
         }
       } else {
-        // Free view: use saved position or provided drop position
-        const newX = dropX !== undefined ? dropX : (item.prevPos?.x || 0);
-        const newY = dropY !== undefined ? dropY : (item.prevPos?.y || 0);
-        restoredItem = { 
-          ...item, 
-          x: newX, 
-          y: newY, 
-          w: item.prevPos?.w || item.w, 
-          h: item.prevPos?.h || item.h 
-        };
-        setItems(prev => [...prev, restoredItem]);
+        // Free view: use saved position or provided drop position (check for duplicates first)
+        if (!items.some(i => i.i === id)) {
+          const newX = dropX !== undefined ? dropX : (item.prevPos?.x || 0);
+          const newY = dropY !== undefined ? dropY : (item.prevPos?.y || 0);
+          restoredItem = { 
+            ...item, 
+            x: newX, 
+            y: newY, 
+            w: item.prevPos?.w || item.w, 
+            h: item.prevPos?.h || item.h 
+          };
+          setItems(prev => [...prev, restoredItem]);
+        } else {
+          return; // Item already exists, don't restore
+        }
       }
       
       setMinimizedItems(prev => prev.filter(i => i.i !== id));
@@ -1399,6 +1513,7 @@ export const Workspace = () => {
   const getVisibleTodos = (module: ModuleItem) => globalTodos.filter(t => t.originModuleId === module.i);
   const currentSpecs = MODULE_SPECS[draggingType];
   const hasClock = items.some(i => i.type === 'clock');
+  const hasPlanner = items.some(i => i.type === 'planner');
   
   // Get active dragged item for overlay
   const activeItem = activeId ? items.find(item => item.i === activeId) : null;
@@ -1413,7 +1528,8 @@ export const Workspace = () => {
             { type: 'stickynote', label: 'Sticky', Icon: FaRegStickyNote, color: '#fdd835', disabled: false },
             { type: 'whiteboard', label: 'Whiteboard', Icon: FaPencilAlt, color: '#6610f2', disabled: false },
             { type: 'todo', label: 'To-Do', Icon: FaCheckSquare, color: '#e83e8c', disabled: false },
-            { type: 'planner', label: 'Planner', Icon: FaTasks, color: '#20c997', disabled: false },
+            { type: 'planner', label: 'Planner', Icon: FaTasks, color: '#20c997', disabled: hasPlanner },
+            { type: 'plannerCalendar', label: 'Plan Cal', Icon: FaCalendarAlt, color: '#4dabf7', disabled: false },
             { type: 'calendar', label: 'Calendar', Icon: FaCalendarAlt, color: '#fd7e14', disabled: false },
             { type: 'events', label: 'Events', Icon: FaList, color: '#17a2b8', disabled: false },
             { type: 'clock', label: 'Clock', Icon: FaRegClock, color: '#28a745', disabled: hasClock },
@@ -1695,7 +1811,7 @@ export const Workspace = () => {
         >
           <ReactGridLayout 
             className="layout" 
-            layout={items.map(i => { 
+            layout={uniqueItems.map(i => { 
               const spec = MODULE_SPECS[i.type]; 
               return { 
                 i: i.i, 
@@ -1729,7 +1845,7 @@ export const Workspace = () => {
             draggableHandle=".drag-handle"
             verticalCompact={false}
           >
-            {items.map((item) => {
+            {uniqueItems.map((item) => {
                const theme = THEMES[item.themeIndex || 0] || THEMES[0];
                return (
               <div key={item.i} className="grid-item">
@@ -1831,6 +1947,15 @@ export const Workspace = () => {
                   {item.type === 'events' && <EventsList events={allEvents} onAddClick={() => openAddEventModal()} onToggleNotify={(id) => setGlobalEvents(prev => prev.map(e => e.id === id ? { ...e, notify: !e.notify } : e))} backgroundColor={theme.body} />}
                   {item.type === 'calendar' && <Calendar events={allEvents} onDayClick={(date) => openAddEventModal(date)} backgroundColor={theme.body} />}
                   {item.type === 'planner' && <Planner content={item.content || ''} onChange={(data) => updateContent(item.i, { content: data })} bgColor={theme.body} />}
+                  {item.type === 'plannerCalendar' && (
+                    <PlannerCalendar
+                      content={item.content || ''}
+                      onChange={(data) => updateContent(item.i, { content: data })}
+                      bgColor={theme.body}
+                      planners={items.filter(i => i.type === 'planner').map(p => ({ id: p.i, title: p.title, content: p.content }))}
+                      updatePlannerContent={(plannerId, newContent) => updateContent(plannerId, { content: newContent })}
+                    />
+                  )}
                 </div>
               </div>
             );
@@ -1846,6 +1971,21 @@ export const Workspace = () => {
             overflowY: 'hidden',
             position: 'relative', 
             zIndex: 1
+          }}
+          onDragOver={(e) => {
+            // Allow dropping new modules from toolbar in structured mode
+            const types = (e.dataTransfer?.types || []) as any;
+            if (types && (Array.from(types).includes('moduleType') || Array.from(types).includes('text/plain'))) {
+              e.preventDefault();
+            }
+          }}
+          onDrop={(e) => {
+            const moduleType = e.dataTransfer?.getData('moduleType') as ModuleType;
+            if (!moduleType) return;
+            e.preventDefault();
+            e.stopPropagation();
+            setIsDropping(false);
+            createStructuredModule(moduleType);
           }}
         >
           <div
@@ -1883,6 +2023,7 @@ export const Workspace = () => {
                         key={item.i}
                         id={item.i}
                         item={item}
+                        allItems={items}
                         theme={theme}
                         editingTitleId={editingTitleId}
                         setEditingTitleId={setEditingTitleId}

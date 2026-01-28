@@ -1,20 +1,32 @@
-import React, { useState, useEffect } from 'react';
-import { FaPlus, FaPencilAlt, FaTimes, FaCheck } from 'react-icons/fa';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
+import { FaPlus, FaTimes, FaCheck, FaCircle, FaBars, FaInfinity } from 'react-icons/fa';
+
+type TaskType = 'one-off' | 'multiple' | 'slider';
 
 interface TaskDef {
   id: string;
   text: string;
+  type?: TaskType; // Default: 'one-off'
+  targetCount?: number; // For Multiple type
+  persistent?: boolean; // ∞ tasks auto-added for every day
 }
 
 interface TaskInst {
   id: string;
   defId: string;
   done: boolean;
+  type?: TaskType; // Inherited from def, but stored per instance
+  count?: number; // For Multiple type, default: 0
+  completionPercentage?: number; // For Slider type, default: 0
 }
 
-interface PlannerData {
+type DayKey = string; // YYYY-MM-DD (local)
+
+interface PlannerDataV2 {
   defs: TaskDef[];
-  plan: TaskInst[];
+  planByDay: Record<DayKey, TaskInst[]>;
+  excludedPersistentByDay: Record<DayKey, string[]>; // dayKey -> defIds excluded for that day
+  selectedDay: DayKey;
 }
 
 interface PlannerProps {
@@ -24,24 +36,151 @@ interface PlannerProps {
 }
 
 export const Planner: React.FC<PlannerProps> = ({ content, onChange, bgColor }) => {
-  const [data, setData] = useState<PlannerData>(() => {
+  const todayKey = useMemo<DayKey>(() => {
+    const d = new Date();
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  }, []);
+
+  const normalizeDef = (d: TaskDef): TaskDef => ({
+    ...d,
+    type: d.type || 'one-off',
+    persistent: !!d.persistent,
+    targetCount: d.targetCount === undefined || d.targetCount === null ? undefined : d.targetCount,
+  });
+
+  const normalizeInst = (p: TaskInst, def?: TaskDef): TaskInst => {
+    const taskType: TaskType = (p.type || def?.type || 'one-off') as TaskType;
+    return {
+      ...p,
+      type: taskType,
+      count: taskType === 'multiple' ? (p.count ?? 0) : undefined,
+      completionPercentage: taskType === 'slider' ? (p.completionPercentage ?? 0) : undefined,
+    };
+  };
+
+  const ensurePersistentForDay = (input: PlannerDataV2, dayKey: DayKey): PlannerDataV2 => {
+    const excluded = new Set(input.excludedPersistentByDay[dayKey] || []);
+    const existing = input.planByDay[dayKey] || [];
+    const have = new Set(existing.map(i => i.defId));
+    const toAdd = input.defs.filter(d => d.persistent && !excluded.has(d.id) && !have.has(d.id));
+    if (toAdd.length === 0) return input;
+    const next: PlannerDataV2 = {
+      ...input,
+      planByDay: {
+        ...input.planByDay,
+        [dayKey]: [
+          ...existing,
+          ...toAdd.map(def => {
+            const taskType = def.type || 'one-off';
+            return normalizeInst(
+              {
+                id: `${dayKey}_${def.id}`, // stable per-day instance id
+                defId: def.id,
+                done: false,
+                type: taskType,
+                count: taskType === 'multiple' ? 0 : undefined,
+                completionPercentage: taskType === 'slider' ? 0 : undefined,
+              },
+              def
+            );
+          }),
+        ],
+      },
+    };
+    return next;
+  };
+
+  const migrateToV2 = (raw: any): PlannerDataV2 => {
+    const defs: TaskDef[] = Array.isArray(raw?.defs) ? raw.defs.map(normalizeDef) : [];
+    // V2 already?
+    if (raw?.planByDay && typeof raw.planByDay === 'object') {
+      const planByDay: Record<DayKey, TaskInst[]> = {};
+      for (const [k, v] of Object.entries<any>(raw.planByDay)) {
+        const dayKey = String(k);
+        const arr: TaskInst[] = Array.isArray(v) ? v : [];
+        planByDay[dayKey] = arr
+          .map(inst => normalizeInst(inst, defs.find(d => d.id === inst.defId)))
+          .filter(inst => !!defs.find(d => d.id === inst.defId));
+      }
+      const excludedPersistentByDay: Record<DayKey, string[]> =
+        raw?.excludedPersistentByDay && typeof raw.excludedPersistentByDay === 'object'
+          ? raw.excludedPersistentByDay
+          : {};
+      const selectedDay: DayKey = typeof raw?.selectedDay === 'string' ? raw.selectedDay : todayKey;
+      return ensurePersistentForDay(
+        {
+          defs,
+          planByDay,
+          excludedPersistentByDay,
+          selectedDay,
+        },
+        selectedDay
+      );
+    }
+
+    // V1: { defs, plan }
+    const planArr: TaskInst[] = Array.isArray(raw?.plan) ? raw.plan : [];
+    const migratedPlan = planArr
+      .map(inst => normalizeInst(inst, defs.find(d => d.id === inst.defId)))
+      .filter(inst => !!defs.find(d => d.id === inst.defId));
+    return ensurePersistentForDay(
+      {
+        defs,
+        planByDay: { [todayKey]: migratedPlan },
+        excludedPersistentByDay: {},
+        selectedDay: todayKey,
+      },
+      todayKey
+    );
+  };
+
+  const lastAppliedContentRef = useRef<string>(content || '');
+
+  const [data, setData] = useState<PlannerDataV2>(() => {
     try {
-      return content ? JSON.parse(content) : { defs: [], plan: [] };
+      const parsed = content ? JSON.parse(content) : {};
+      return migrateToV2(parsed);
     } catch {
-      return { defs: [], plan: [] };
+      return migrateToV2({});
     }
   });
 
   // Persist changes
   useEffect(() => {
-    onChange(JSON.stringify(data));
+    const serialized = JSON.stringify(data);
+    lastAppliedContentRef.current = serialized;
+    onChange(serialized);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
+
+  // External updates (e.g., PlannerCalendar) should refresh this module state.
+  useEffect(() => {
+    if (!content) return;
+    if (content === lastAppliedContentRef.current) return;
+    try {
+      const parsed = JSON.parse(content);
+      lastAppliedContentRef.current = content;
+      setData(migrateToV2(parsed));
+    } catch {
+      // ignore invalid content
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [content]);
+
+  // Keep persistent tasks injected for the selected day (and keep data normalized)
+  useEffect(() => {
+    setData(prev => ensurePersistentForDay(prev, prev.selectedDay));
+  }, [data.selectedDay]);
 
   const [editingDefId, setEditingDefId] = useState<string | null>(null);
   const [tempText, setTempText] = useState('');
   const [isAddingNew, setIsAddingNew] = useState(false);
   const [isLibraryExpanded, setIsLibraryExpanded] = useState(false);
+  const [draggingSliderId, setDraggingSliderId] = useState<string | null>(null);
+  const sliderRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
   // --- ACTIONS ---
 
@@ -50,8 +189,8 @@ export const Planner: React.FC<PlannerProps> = ({ content, onChange, bgColor }) 
       setIsAddingNew(false);
       return;
     }
-    const newDef: TaskDef = { id: Date.now().toString(), text: tempText };
-    setData(prev => ({ ...prev, defs: [...prev.defs, newDef] }));
+    const newDef: TaskDef = { id: Date.now().toString(), text: tempText, type: 'one-off', persistent: false };
+    setData(prev => ensurePersistentForDay({ ...prev, defs: [...prev.defs, normalizeDef(newDef)] }, prev.selectedDay));
     setTempText('');
     setIsAddingNew(false);
   };
@@ -63,50 +202,256 @@ export const Planner: React.FC<PlannerProps> = ({ content, onChange, bgColor }) 
     }
     setData(prev => ({
       ...prev,
-      defs: prev.defs.map(d => d.id === id ? { ...d, text: tempText } : d)
+      defs: prev.defs.map(d => (d.id === id ? normalizeDef({ ...d, text: tempText }) : d)),
     }));
     setEditingDefId(null);
     setTempText('');
   };
 
+  const updateTargetCount = (defId: string, targetCount: number | undefined) => {
+    setData(prev => ({
+      ...prev,
+      defs: prev.defs.map(d => 
+        d.id === defId ? { ...d, targetCount: targetCount === undefined || targetCount <= 0 ? undefined : targetCount } : d
+      ),
+      // Update done status for existing instances if target is reached
+      planByDay: Object.fromEntries(
+        Object.entries(prev.planByDay).map(([dayKey, items]) => [
+          dayKey,
+          items.map(p => {
+            if (p.defId === defId && p.type === 'multiple' && targetCount !== undefined && targetCount > 0) {
+              const count = p.count || 0;
+              return { ...p, done: count >= targetCount };
+            }
+            return p;
+          }),
+        ])
+      ),
+    }));
+  };
+
   const removeDefinition = (id: string) => {
     setData(prev => ({
       defs: prev.defs.filter(d => d.id !== id),
-      plan: prev.plan.filter(p => p.defId !== id) // Cascade delete instances
+      planByDay: Object.fromEntries(
+        Object.entries(prev.planByDay).map(([dayKey, items]) => [dayKey, items.filter(p => p.defId !== id)])
+      ),
+      excludedPersistentByDay: Object.fromEntries(
+        Object.entries(prev.excludedPersistentByDay).map(([dayKey, defIds]) => [dayKey, defIds.filter(defId => defId !== id)])
+      ),
+      selectedDay: prev.selectedDay,
     }));
   };
 
   const addToPlan = (defId: string) => {
-    const newInst: TaskInst = { id: Date.now().toString() + Math.random(), defId, done: false };
-    setData(prev => ({ ...prev, plan: [...prev.plan, newInst] }));
+    setData(prev => {
+      const dayKey = prev.selectedDay;
+      const def = prev.defs.find(d => d.id === defId);
+      if (!def) return prev;
+      const current = prev.planByDay[dayKey] || [];
+      const existing = current.find(p => p.defId === defId);
+      if (existing) {
+        // If persistent was excluded, un-exclude on explicit add
+        if (def.persistent) {
+          const excluded = prev.excludedPersistentByDay[dayKey] || [];
+          if (excluded.includes(defId)) {
+            return ensurePersistentForDay(
+              {
+                ...prev,
+                excludedPersistentByDay: {
+                  ...prev.excludedPersistentByDay,
+                  [dayKey]: excluded.filter(x => x !== defId),
+                },
+              },
+              dayKey
+            );
+          }
+        }
+        return prev;
+      }
+      const taskType = def.type || 'one-off';
+      const newInst: TaskInst = normalizeInst(
+        {
+          id: `${dayKey}_${defId}`,
+          defId,
+          done: false,
+          type: taskType,
+          count: taskType === 'multiple' ? 0 : undefined,
+          completionPercentage: taskType === 'slider' ? 0 : undefined,
+        },
+        def
+      );
+      const next: PlannerDataV2 = {
+        ...prev,
+        planByDay: {
+          ...prev.planByDay,
+          [dayKey]: [...current, newInst],
+        },
+      };
+      // If persistent was excluded, remove exclusion
+      if (def.persistent) {
+        const excluded = prev.excludedPersistentByDay[dayKey] || [];
+        if (excluded.includes(defId)) {
+          next.excludedPersistentByDay = {
+            ...prev.excludedPersistentByDay,
+            [dayKey]: excluded.filter(x => x !== defId),
+          };
+        }
+      }
+      return next;
+    });
   };
 
-  const toggleDone = (instId: string) => {
+  const handleTypeChange = (defId: string, newType: TaskType) => {
+    setData(prev => {
+      const updatedDefs = prev.defs.map(d => 
+        d.id === defId ? { ...d, type: newType } : d
+      );
+      const updatedPlanByDay: Record<DayKey, TaskInst[]> = Object.fromEntries(
+        Object.entries(prev.planByDay).map(([dayKey, items]) => [
+          dayKey,
+          items.map(p => {
+            if (p.defId === defId) {
+              if (newType === 'one-off') return { ...p, type: newType, count: undefined, completionPercentage: undefined, done: false };
+              if (newType === 'multiple') return { ...p, type: newType, count: 0, completionPercentage: undefined, done: false };
+              return { ...p, type: newType, count: undefined, completionPercentage: 0, done: false };
+            }
+            return p;
+          }),
+        ])
+      );
+      return ensurePersistentForDay(
+        { ...prev, defs: updatedDefs.map(normalizeDef), planByDay: updatedPlanByDay },
+        prev.selectedDay
+      );
+    });
+  };
+
+  const handleMultipleClick = (instId: string, dayKey: DayKey) => {
+    setData(prev => {
+      const inst = (prev.planByDay[dayKey] || []).find(p => p.id === instId);
+      if (!inst) return prev;
+      const def = prev.defs.find(d => d.id === inst.defId);
+      const newCount = (inst.count || 0) + 1;
+      const targetCount = def?.targetCount;
+      const isDone = targetCount !== undefined && newCount >= targetCount;
+      return {
+        ...prev,
+        planByDay: {
+          ...prev.planByDay,
+          [dayKey]: (prev.planByDay[dayKey] || []).map(p => (p.id === instId ? { ...p, count: newCount, done: isDone } : p)),
+        },
+      };
+    });
+  };
+
+  const handleSliderDrag = (instId: string, dayKey: DayKey, percentage: number) => {
+    const clampedPercentage = Math.max(0, Math.min(100, percentage));
+    const isDone = clampedPercentage >= 100;
     setData(prev => ({
       ...prev,
-      plan: prev.plan.map(p => p.id === instId ? { ...p, done: !p.done } : p)
+      planByDay: {
+        ...prev.planByDay,
+        [dayKey]: (prev.planByDay[dayKey] || []).map(p =>
+          p.id === instId ? { ...p, completionPercentage: clampedPercentage, done: isDone } : p
+        ),
+      },
     }));
   };
 
+  const toggleDone = (instId: string) => {
+    const dayKey = data.selectedDay;
+    const inst = (data.planByDay[dayKey] || []).find(p => p.id === instId);
+    if (!inst) return;
+    const taskType = inst.type || 'one-off';
+    
+    if (taskType === 'one-off') {
+      setData(prev => ({
+        ...prev,
+        planByDay: {
+          ...prev.planByDay,
+          [dayKey]: (prev.planByDay[dayKey] || []).map(p => (p.id === instId ? { ...p, done: !p.done } : p)),
+        },
+      }));
+    } else if (taskType === 'multiple') {
+      handleMultipleClick(instId, dayKey);
+    }
+    // Slider type handled separately via drag
+  };
+
   const removeFromPlan = (instId: string) => {
-    setData(prev => ({ ...prev, plan: prev.plan.filter(p => p.id !== instId) }));
+    setData(prev => {
+      const dayKey = prev.selectedDay;
+      const current = prev.planByDay[dayKey] || [];
+      const inst = current.find(p => p.id === instId);
+      if (!inst) return prev;
+      const def = prev.defs.find(d => d.id === inst.defId);
+
+      const next: PlannerDataV2 = {
+        ...prev,
+        planByDay: {
+          ...prev.planByDay,
+          [dayKey]: current.filter(p => p.id !== instId),
+        },
+      };
+
+      // If persistent: record exclusion for this day
+      if (def?.persistent) {
+        const existingExcluded = prev.excludedPersistentByDay[dayKey] || [];
+        if (!existingExcluded.includes(def.id)) {
+          next.excludedPersistentByDay = {
+            ...prev.excludedPersistentByDay,
+            [dayKey]: [...existingExcluded, def.id],
+          };
+        }
+      }
+
+      return next;
+    });
   };
 
   // --- DRAG & DROP ---
+  // Note: Drag functionality removed - items are added via click only
 
-  const handleDragStart = (e: React.DragEvent, defId: string) => {
-    e.dataTransfer.setData('plannerDefId', defId);
-    e.dataTransfer.effectAllowed = 'copy';
-  };
-
-  const handleDropOnLeft = (e: React.DragEvent) => {
+  // Slider drag handlers
+  const handleSliderMouseDown = (e: React.MouseEvent, instId: string) => {
     e.preventDefault();
-    e.stopPropagation(); // Prevent event from bubbling to grid's drop handler
-    const defId = e.dataTransfer.getData('plannerDefId');
-    if (defId) {
-      addToPlan(defId);
+    e.stopPropagation();
+    setDraggingSliderId(instId);
+    const sliderElement = sliderRefs.current.get(instId);
+    if (sliderElement) {
+      const rect = sliderElement.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const percentage = (x / rect.width) * 100;
+      handleSliderDrag(instId, data.selectedDay, percentage);
     }
   };
+
+  useEffect(() => {
+    if (!draggingSliderId) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const sliderElement = sliderRefs.current.get(draggingSliderId);
+      if (sliderElement) {
+        const rect = sliderElement.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const percentage = (x / rect.width) * 100;
+        handleSliderDrag(draggingSliderId, data.selectedDay, percentage);
+      }
+    };
+
+    const handleMouseUp = () => {
+      setDraggingSliderId(null);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [draggingSliderId]);
 
   return (
     <div style={{ display: 'flex', height: '100%', position: 'relative', overflow: 'hidden', background: bgColor }}>
@@ -123,48 +468,147 @@ export const Planner: React.FC<PlannerProps> = ({ content, onChange, bgColor }) 
           gap: '8px',
           transition: 'padding-right 0.3s ease'
         }}
-        onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
-        onDrop={handleDropOnLeft}
       >
-        {data.plan.length === 0 && (
+        {/* Day selector */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <input
+            type="date"
+            value={data.selectedDay}
+            onChange={(e) => {
+              const nextDay = e.target.value as DayKey;
+              if (!nextDay) return;
+              setData(prev => ensurePersistentForDay({ ...prev, selectedDay: nextDay }, nextDay));
+            }}
+            style={{ fontSize: '12px', padding: '2px 4px', border: '1px solid rgba(0,0,0,0.2)', borderRadius: '4px' }}
+          />
+          <button
+            onClick={() => setData(prev => ensurePersistentForDay({ ...prev, selectedDay: todayKey }, todayKey))}
+            style={{ fontSize: '11px', padding: '2px 6px', borderRadius: '4px', border: '1px solid rgba(0,0,0,0.15)', background: 'rgba(255,255,255,0.6)', cursor: 'pointer' }}
+          >
+            Today
+          </button>
+        </div>
+
+        {(data.planByDay[data.selectedDay] || []).length === 0 && (
             <div style={{ opacity: 0.4, fontStyle: 'italic', fontSize: '12px', textAlign: 'center', marginTop: '20px' }}>
-                Drag tasks here or click them on the right.
+                Click tasks on the right to add them here.
             </div>
         )}
-        {data.plan.map(inst => {
+        {(data.planByDay[data.selectedDay] || []).map(inst => {
           const def = data.defs.find(d => d.id === inst.defId);
           if (!def) return null;
+          const taskType = inst.type || def.type || 'one-off';
+          
           return (
             <div 
               key={inst.id}
               style={{ 
-                display: 'flex', alignItems: 'center', gap: '8px', 
-                background: 'rgba(255,255,255,0.5)', padding: '6px 10px', borderRadius: '4px',
+                display: 'flex', 
+                flexDirection: 'column',
+                gap: '4px',
+                background: 'rgba(255,255,255,0.5)', 
+                padding: '6px 10px', 
+                borderRadius: '4px',
                 border: '1px solid rgba(0,0,0,0.1)'
               }}
             >
-              <div 
-                onClick={() => toggleDone(inst.id)}
-                style={{ cursor: 'pointer', color: inst.done ? '#28a745' : '#ccc' }}
-              >
-                <FaCheck size={12} />
-              </div>
-              <span 
-                onClick={() => toggleDone(inst.id)}
-                style={{ 
-                    flex: 1, cursor: 'pointer', fontSize: '13px', 
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                {/* One-off: Checkbox */}
+                {taskType === 'one-off' && (
+                  <div 
+                    onClick={() => toggleDone(inst.id)}
+                    style={{ cursor: 'pointer', color: inst.done ? '#28a745' : '#ccc', flexShrink: 0 }}
+                  >
+                    <FaCheck size={12} />
+                  </div>
+                )}
+                
+                {/* Multiple: Circle with count */}
+                {taskType === 'multiple' && (
+                  <div 
+                    onClick={() => toggleDone(inst.id)}
+                    style={{ 
+                      cursor: 'pointer', 
+                      color: inst.done ? '#28a745' : '#666',
+                      flexShrink: 0,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: '20px',
+                      height: '20px',
+                      borderRadius: '50%',
+                      border: `2px solid ${inst.done ? '#28a745' : '#666'}`,
+                      fontSize: '10px',
+                      fontWeight: 'bold'
+                    }}
+                    title="Click to increment"
+                  >
+                    x{inst.count || 0}
+                  </div>
+                )}
+                
+                {/* Slider: Ruler icon */}
+                {taskType === 'slider' && (
+                  <div 
+                    style={{ 
+                      color: inst.done ? '#28a745' : '#666',
+                      flexShrink: 0,
+                      display: 'flex',
+                      alignItems: 'center'
+                    }}
+                  >
+                    <FaBars size={12} />
+                  </div>
+                )}
+                
+                <span 
+                  onClick={() => taskType !== 'slider' && toggleDone(inst.id)}
+                  style={{ 
+                    flex: 1, 
+                    cursor: taskType === 'slider' ? 'default' : 'pointer', 
+                    fontSize: '13px', 
                     textDecoration: inst.done ? 'line-through' : 'none', 
                     opacity: inst.done ? 0.6 : 1 
-                }}
-              >
-                {def.text}
-              </span>
-              <button 
-                onClick={() => removeFromPlan(inst.id)}
-                style={{ background: 'transparent', border: 'none', color: '#dc3545', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
-              >
-                <FaTimes size={12} />
-              </button>
+                  }}
+                >
+                  {def.text}
+                </span>
+                <button 
+                  onClick={() => removeFromPlan(inst.id)}
+                  style={{ background: 'transparent', border: 'none', color: '#dc3545', cursor: 'pointer', display: 'flex', alignItems: 'center', flexShrink: 0 }}
+                >
+                  <FaTimes size={12} />
+                </button>
+              </div>
+              
+              {/* Slider progress bar */}
+              {taskType === 'slider' && (
+                <div
+                  ref={(el) => {
+                    if (el) sliderRefs.current.set(inst.id, el);
+                    else sliderRefs.current.delete(inst.id);
+                  }}
+                  onMouseDown={(e) => handleSliderMouseDown(e, inst.id)}
+                  style={{
+                    height: '4px',
+                    background: '#e0e0e0',
+                    borderRadius: '2px',
+                    margin: '0 10px',
+                    position: 'relative',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <div
+                    style={{
+                      height: '100%',
+                      width: `${inst.completionPercentage || 0}%`,
+                      background: inst.done ? '#28a745' : '#007bff',
+                      borderRadius: '2px',
+                      transition: draggingSliderId === inst.id ? 'none' : 'width 0.1s ease'
+                    }}
+                  />
+                </div>
+              )}
             </div>
           );
         })}
@@ -227,42 +671,160 @@ export const Planner: React.FC<PlannerProps> = ({ content, onChange, bgColor }) 
             <h4 style={{ margin: '0 0 10px 0', fontSize: '12px', opacity: 0.7, textTransform: 'uppercase' }}>Task Library</h4>
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                {data.defs.map(def => (
-                    <div 
-                        key={def.id} 
-                        draggable
-                        onDragStart={(e) => handleDragStart(e, def.id)}
-                        style={{ 
-                            display: 'flex', alignItems: 'center', gap: '5px',
-                            background: 'white', padding: '5px', borderRadius: '4px',
-                            border: '1px solid #eee', cursor: 'grab'
-                        }}
-                    >
-                        {editingDefId === def.id ? (
-                            <input 
-                                autoFocus
-                                type="text" 
-                                value={tempText} 
-                                onChange={(e) => setTempText(e.target.value)}
-                                onBlur={() => updateDefinition(def.id)}
-                                onKeyDown={(e) => e.key === 'Enter' && updateDefinition(def.id)}
-                                style={{ flex: 1, border: '1px solid #007bff', fontSize: '12px', padding: '2px' }}
-                            />
-                        ) : (
-                            <>
-                                <span 
-                                    onClick={() => addToPlan(def.id)}
-                                    style={{ flex: 1, fontSize: '12px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
-                                    title="Click to add to plan"
-                                >
-                                    {def.text}
-                                </span>
-                                <button onClick={() => { setEditingDefId(def.id); setTempText(def.text); }} style={{ border: 'none', background: 'transparent', color: '#666', cursor: 'pointer' }}><FaPencilAlt size={10}/></button>
-                                <button onClick={() => removeDefinition(def.id)} style={{ border: 'none', background: 'transparent', color: '#dc3545', cursor: 'pointer' }}><FaTimes size={12}/></button>
-                            </>
-                        )}
-                    </div>
-                ))}
+                {data.defs.map(def => {
+                    const taskType = def.type || 'one-off';
+                    return (
+                        <div 
+                            key={def.id} 
+                            style={{ 
+                                display: 'flex', 
+                                flexDirection: 'column',
+                                gap: '4px',
+                                background: 'white', 
+                                padding: '5px', 
+                                borderRadius: '4px',
+                                border: '1px solid #eee', 
+                                cursor: 'default'
+                            }}
+                        >
+                            {editingDefId === def.id ? (
+                                <input 
+                                    autoFocus
+                                    type="text" 
+                                    value={tempText} 
+                                    onChange={(e) => setTempText(e.target.value)}
+                                    onBlur={() => updateDefinition(def.id)}
+                                    onKeyDown={(e) => e.key === 'Enter' && updateDefinition(def.id)}
+                                    style={{ flex: 1, border: '1px solid #007bff', fontSize: '12px', padding: '2px' }}
+                                />
+                            ) : (
+                                <>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                        <span 
+                                            onDoubleClick={() => { setEditingDefId(def.id); setTempText(def.text); }}
+                                            onClick={() => addToPlan(def.id)}
+                                            style={{ flex: 1, fontSize: '12px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', cursor: 'pointer' }}
+                                            title="Click to add to plan, double-click to edit"
+                                        >
+                                            {def.text}
+                                        </span>
+                                        
+                                        {/* Type selector icons */}
+                                        <button 
+                                            onClick={(e) => { e.stopPropagation(); handleTypeChange(def.id, 'one-off'); }}
+                                            style={{ 
+                                                border: 'none', 
+                                                background: taskType === 'one-off' ? '#e3f2fd' : 'transparent', 
+                                                color: taskType === 'one-off' ? '#1976d2' : '#666', 
+                                                cursor: 'pointer',
+                                                padding: '2px 4px',
+                                                borderRadius: '2px',
+                                                display: 'flex',
+                                                alignItems: 'center'
+                                            }}
+                                            title="One-off (checkbox)"
+                                        >
+                                            <FaCheck size={10}/>
+                                        </button>
+                                        <button 
+                                            onClick={(e) => { e.stopPropagation(); handleTypeChange(def.id, 'multiple'); }}
+                                            style={{ 
+                                                border: 'none', 
+                                                background: taskType === 'multiple' ? '#e3f2fd' : 'transparent', 
+                                                color: taskType === 'multiple' ? '#1976d2' : '#666', 
+                                                cursor: 'pointer',
+                                                padding: '2px 4px',
+                                                borderRadius: '2px',
+                                                display: 'flex',
+                                                alignItems: 'center'
+                                            }}
+                                            title="Multiple (count)"
+                                        >
+                                            <FaCircle size={10}/>
+                                        </button>
+                                        <button 
+                                            onClick={(e) => { e.stopPropagation(); handleTypeChange(def.id, 'slider'); }}
+                                            style={{ 
+                                                border: 'none', 
+                                                background: taskType === 'slider' ? '#e3f2fd' : 'transparent', 
+                                                color: taskType === 'slider' ? '#1976d2' : '#666', 
+                                                cursor: 'pointer',
+                                                padding: '2px 4px',
+                                                borderRadius: '2px',
+                                                display: 'flex',
+                                                alignItems: 'center'
+                                            }}
+                                            title="Slider (percentage)"
+                                        >
+                                            <FaBars size={10}/>
+                                        </button>
+
+                                        {/* Persistent toggle (∞) */}
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                setData(prev => {
+                                                  const updatedDefs = prev.defs.map(d =>
+                                                    d.id === def.id ? normalizeDef({ ...d, persistent: !d.persistent }) : d
+                                                  );
+                                                  const next = { ...prev, defs: updatedDefs };
+                                                  // If turning on persistent, ensure it appears for selected day immediately (unless excluded)
+                                                  return ensurePersistentForDay(next, next.selectedDay);
+                                                });
+                                            }}
+                                            style={{
+                                                border: 'none',
+                                                background: def.persistent ? '#e8f5e9' : 'transparent',
+                                                color: def.persistent ? '#2e7d32' : '#666',
+                                                cursor: 'pointer',
+                                                padding: '2px 4px',
+                                                borderRadius: '2px',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                            }}
+                                            title={def.persistent ? 'Persistent (∞) on' : 'Persistent (∞) off'}
+                                        >
+                                            <FaInfinity size={10} />
+                                        </button>
+                                        
+                                        <button 
+                                            onClick={(e) => { e.stopPropagation(); removeDefinition(def.id); }} 
+                                            style={{ border: 'none', background: 'transparent', color: '#dc3545', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                                        >
+                                            <FaTimes size={12}/>
+                                        </button>
+                                    </div>
+                                    
+                                    {/* Target count input for Multiple type */}
+                                    {taskType === 'multiple' && (
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginLeft: '4px' }}>
+                                            <label style={{ fontSize: '10px', color: '#666' }}>Target:</label>
+                                            <input
+                                                type="number"
+                                                min="1"
+                                                value={def.targetCount || ''}
+                                                onChange={(e) => {
+                                                    const val = e.target.value === '' ? undefined : parseInt(e.target.value, 10);
+                                                    updateTargetCount(def.id, val);
+                                                }}
+                                                onClick={(e) => e.stopPropagation()}
+                                                style={{
+                                                    width: '40px',
+                                                    height: '16px',
+                                                    fontSize: '10px',
+                                                    border: '1px solid #ccc',
+                                                    borderRadius: '2px',
+                                                    padding: '0 4px'
+                                                }}
+                                                placeholder="∞"
+                                            />
+                                        </div>
+                                    )}
+                                </>
+                            )}
+                        </div>
+                    );
+                })}
             </div>
 
             {/* Add Button */}

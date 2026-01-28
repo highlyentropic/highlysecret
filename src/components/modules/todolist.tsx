@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { FaCheck, FaStickyNote, FaPlus } from 'react-icons/fa';
 import type { TodoItem, CalendarEvent } from '../../types';
 import { getImageUrl } from '../../utils/imageUtils';
@@ -100,9 +100,110 @@ export const TodoList: React.FC<TodoListProps> = ({
       return `rgba(${r},${g},${b},0.15)`;
   };
 
+  // Build a safe tree structure that prevents duplicates and cycles
+  const { rootItems, itemMap, childrenMap } = useMemo(() => {
+      // Create a map of all items by ID for quick lookup
+      const itemMap = new Map<string, TodoItem>();
+      const childrenMap = new Map<string, TodoItem[]>();
+      const itemIds = new Set<string>();
+      const rootItems: TodoItem[] = [];
+
+      // First pass: validate and deduplicate items
+      const validItems: TodoItem[] = [];
+      for (const item of items) {
+          // Skip if duplicate ID
+          if (itemIds.has(item.id)) {
+              console.warn(`Duplicate todo item ID detected: ${item.id}`);
+              continue;
+          }
+          itemIds.add(item.id);
+          validItems.push(item);
+          itemMap.set(item.id, item);
+      }
+
+      // Second pass: build children map and detect cycles
+      const visited = new Set<string>();
+      const buildTree = (itemId: string, path: Set<string>): boolean => {
+          if (path.has(itemId)) {
+              // Cycle detected - break it by making this a root item
+              console.warn(`Cycle detected in todo items for ID: ${itemId}`);
+              return false;
+          }
+          if (visited.has(itemId)) {
+              return true; // Already processed
+          }
+
+          const item = itemMap.get(itemId);
+          if (!item) return false;
+
+          visited.add(itemId);
+          const newPath = new Set(path);
+          newPath.add(itemId);
+
+          // Validate parentId
+          if (item.parentId) {
+              const parentExists = itemMap.has(item.parentId);
+              const isSelfReference = item.parentId === item.id;
+              
+              if (!parentExists || isSelfReference) {
+                  // Invalid parent - make it a root item
+                  if (isSelfReference) {
+                      console.warn(`Self-reference detected for todo item: ${item.id}`);
+                  }
+                  return false;
+              }
+
+              // Check for cycles in parent chain
+              if (!buildTree(item.parentId, newPath)) {
+                  // Parent chain has issues - make this a root item
+                  return false;
+              }
+
+              // Add to children map
+              if (!childrenMap.has(item.parentId)) {
+                  childrenMap.set(item.parentId, []);
+              }
+              childrenMap.get(item.parentId)!.push(item);
+              return true;
+          }
+
+          return true;
+      };
+
+      // Process all items
+      for (const item of validItems) {
+          if (!item.parentId) {
+              // Root item - no parent
+              rootItems.push(item);
+          } else {
+              // Validate parent chain
+              const path = new Set<string>();
+              if (!buildTree(item.id, path)) {
+                  // Invalid parent chain - make it a root item
+                  rootItems.push(item);
+              }
+          }
+      }
+
+      // Sort children for consistent rendering
+      childrenMap.forEach((children) => {
+          children.sort((a, b) => a.text.localeCompare(b.text));
+      });
+
+      return { rootItems, itemMap, childrenMap };
+  }, [items]);
+
   // --- RECURSIVE ITEM RENDERER ---
-  const renderTodoItem = (item: TodoItem) => {
-      const children = items.filter(i => i.parentId === item.id);
+  // Create a fresh visited set for this render cycle to prevent duplicates
+  const renderTodoItem = (item: TodoItem, visited: Set<string> = new Set<string>()) => {
+      // Prevent rendering the same item twice (defensive check)
+      if (visited.has(item.id)) {
+          console.warn(`Attempted to render duplicate item: ${item.id}`);
+          return null;
+      }
+      visited.add(item.id);
+
+      const children = childrenMap.get(item.id) || [];
       const hasDesc = item.description && item.description.trim().length > 0;
       const bgColor = getTintedBackground(item.color || '#333333');
       const solidColor = item.color || '#333';
@@ -118,7 +219,7 @@ export const TodoList: React.FC<TodoListProps> = ({
 
       return (
           <div 
-            key={item.id} 
+            key={item.id}
             style={{ display: 'flex', flexDirection: 'column' }}
             onMouseEnter={(e) => { e.stopPropagation(); setHoveredItemId(item.id); }}
             onMouseLeave={(e) => { e.stopPropagation(); if(hoveredItemId === item.id) setHoveredItemId(null); }}
@@ -245,13 +346,11 @@ export const TodoList: React.FC<TodoListProps> = ({
                      </div>
                 )}
 
-                {children.map(child => renderTodoItem(child))}
+                {children.map(child => renderTodoItem(child, visited))}
             </div>
           </div>
       );
   };
-
-  const rootItems = items.filter(i => !i.parentId);
 
   return (
     <div 
@@ -263,7 +362,11 @@ export const TodoList: React.FC<TodoListProps> = ({
       
       {/* List */}
       <div style={{ flex: 1, overflowY: 'visible', padding: '10px', minHeight: 0 }}>
-        {rootItems.map(item => renderTodoItem(item))}
+        {(() => {
+          // Create a shared visited set for this render cycle
+          const visited = new Set<string>();
+          return rootItems.map(item => renderTodoItem(item, visited));
+        })()}
 
         {/* Root Add Input */}
         <div style={{ display: 'flex', alignItems: 'center', marginTop: '10px', opacity: 0.7 }}>
