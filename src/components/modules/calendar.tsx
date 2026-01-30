@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { FaChevronLeft, FaChevronRight, FaCalendarDay, FaCalendarWeek, FaCalendarAlt, FaCaretDown, FaSearchPlus, FaSearchMinus } from 'react-icons/fa';
 import { format, startOfWeek, eachDayOfInterval, addDays, addMonths, subMonths, isSameDay, setYear, setMonth, getDay, isToday } from 'date-fns';
 import type { CalendarEvent } from '../../types';
@@ -6,12 +6,13 @@ import type { CalendarEvent } from '../../types';
 interface CalendarProps {
   events: CalendarEvent[];
   onDayClick: (date: Date) => void;
+  onDropItemOnDay?: (date: Date, itemName: string) => void;
   backgroundColor?: string;
 }
 
 type ViewType = 'month' | 'week' | 'day';
 
-export const Calendar: React.FC<CalendarProps> = ({ events, onDayClick, backgroundColor = 'white' }) => {
+export const Calendar: React.FC<CalendarProps> = ({ events, onDayClick, onDropItemOnDay, backgroundColor = 'white' }) => {
   const [viewDate, setViewDate] = useState(new Date());
   const [viewType, setViewType] = useState<ViewType>('month');
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -88,7 +89,7 @@ export const Calendar: React.FC<CalendarProps> = ({ events, onDayClick, backgrou
 
       {/* CONTENT */}
       <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
-          {viewType === 'month' && <MonthView currentDate={viewDate} events={events} onDayClick={onDayClick} />}
+          {viewType === 'month' && <MonthView currentDate={viewDate} events={events} onDayClick={onDayClick} onDropItemOnDay={onDropItemOnDay} />}
           {viewType === 'week' && <TimeGridView currentDate={viewDate} events={events} onDayClick={onDayClick} days={7} hourHeight={hourHeight} />}
           {viewType === 'day' && <TimeGridView currentDate={viewDate} events={events} onDayClick={onDayClick} days={1} hourHeight={hourHeight} />}
       </div>
@@ -102,12 +103,45 @@ interface MonthViewProps {
     currentDate: Date;
     events: CalendarEvent[];
     onDayClick: (date: Date) => void;
+    onDropItemOnDay?: (date: Date, itemName: string) => void;
 }
 
-const MonthView: React.FC<MonthViewProps> = ({ currentDate, events, onDayClick }) => {
+const MonthView: React.FC<MonthViewProps> = ({ currentDate, events, onDayClick, onDropItemOnDay }) => {
+    const gridRef = useRef<HTMLDivElement>(null);
     const daysInMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate();
     const firstDayIndex = getDay(setMonth(currentDate, currentDate.getMonth()).setDate(1)) || 7; 
     const offset = firstDayIndex === 0 ? 6 : firstDayIndex - 1; 
+    const gap = 1;
+    const cols = 7;
+    const rows = 6;
+
+    const handleGridDrop = (e: React.DragEvent) => {
+        if (!onDropItemOnDay) return;
+        const itemName = e.dataTransfer.getData('todoItemText') || e.dataTransfer.getData('plannerItemName');
+        if (!itemName || !gridRef.current) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const rect = gridRef.current.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        const cellW = (rect.width - (cols - 1) * gap) / cols;
+        const cellH = (rect.height - (rows - 1) * gap) / rows;
+        const col = Math.min(cols - 1, Math.max(0, Math.floor(x / (cellW + gap))));
+        const row = Math.min(rows - 1, Math.max(0, Math.floor(y / (cellH + gap))));
+        const cellIndex = row * cols + col;
+        if (cellIndex < offset || cellIndex >= offset + daysInMonth) return;
+        const day = cellIndex - offset + 1;
+        const date = new Date(currentDate.getFullYear(), currentDate.getMonth(), day);
+        onDropItemOnDay(date, itemName);
+    };
+
+    const handleGridDragOver = (e: React.DragEvent) => {
+        if (onDropItemOnDay && (e.dataTransfer.types.includes('todoItemText') || e.dataTransfer.types.includes('plannerItemName'))) {
+            e.preventDefault();
+            e.stopPropagation();
+            e.dataTransfer.dropEffect = 'copy';
+        }
+    };
 
     const gridCells = [];
     for (let i = 0; i < offset; i++) gridCells.push(<div key={`empty-${i}`} style={cellStyle} />);
@@ -146,7 +180,12 @@ const MonthView: React.FC<MonthViewProps> = ({ currentDate, events, onDayClick }
                     <div key={i} style={{ fontSize: '9px', fontWeight: 'bold', color: '#666' }}>{d}</div>
                 ))}
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gridTemplateRows: 'repeat(6, 1fr)', gap: '1px', flex: 1, minHeight: 0 }}>
+            <div
+                ref={gridRef}
+                onDragOver={handleGridDragOver}
+                onDrop={handleGridDrop}
+                style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gridTemplateRows: 'repeat(6, 1fr)', gap: '1px', flex: 1, minHeight: 0 }}
+            >
                 {gridCells}
             </div>
         </div>

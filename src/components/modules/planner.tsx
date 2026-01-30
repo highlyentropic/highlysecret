@@ -33,9 +33,13 @@ interface PlannerProps {
   content: string;
   onChange: (newContent: string) => void;
   bgColor: string;
+  gridW?: number;
+  moduleWidthPx?: number;
+  onDragStartItem?: () => void;
+  onDragEndItem?: () => void;
 }
 
-export const Planner: React.FC<PlannerProps> = ({ content, onChange, bgColor }) => {
+export const Planner: React.FC<PlannerProps> = ({ content, onChange, bgColor, gridW = 16, moduleWidthPx = 380, onDragStartItem, onDragEndItem }) => {
   const todayKey = useMemo<DayKey>(() => {
     const d = new Date();
     const yyyy = d.getFullYear();
@@ -179,9 +183,6 @@ export const Planner: React.FC<PlannerProps> = ({ content, onChange, bgColor }) 
   const [tempText, setTempText] = useState('');
   const [isAddingNew, setIsAddingNew] = useState(false);
   const [isLibraryExpanded, setIsLibraryExpanded] = useState(false);
-  const [draggingSliderId, setDraggingSliderId] = useState<string | null>(null);
-  const sliderRefs = useRef<Map<string, HTMLDivElement>>(new Map());
-
   // --- ACTIONS ---
 
   const addDefinition = () => {
@@ -241,6 +242,37 @@ export const Planner: React.FC<PlannerProps> = ({ content, onChange, bgColor }) 
       ),
       selectedDay: prev.selectedDay,
     }));
+  };
+
+  const handleDropFromTodo = (todoItemText: string) => {
+    const text = (todoItemText || '').trim();
+    if (!text) return;
+    setData(prev => {
+      const existing = prev.defs.find(d => d.text === text);
+      let defId: string;
+      let next = prev;
+      if (existing) {
+        defId = existing.id;
+      } else {
+        const newDef: TaskDef = { id: Date.now().toString(), text, type: 'one-off', persistent: false };
+        next = { ...prev, defs: [...prev.defs, normalizeDef(newDef)] };
+        defId = newDef.id;
+      }
+      const dayKey = next.selectedDay;
+      const def = next.defs.find(d => d.id === defId);
+      if (!def) return next;
+      const current = next.planByDay[dayKey] || [];
+      if (current.some(p => p.defId === defId)) return next;
+      const taskType = def.type || 'one-off';
+      const newInst: TaskInst = normalizeInst(
+        { id: `${dayKey}_${defId}`, defId, done: false, type: taskType, count: taskType === 'multiple' ? 0 : undefined, completionPercentage: taskType === 'slider' ? 0 : undefined },
+        def
+      );
+      return ensurePersistentForDay(
+        { ...next, planByDay: { ...next.planByDay, [dayKey]: [...current, newInst] } },
+        dayKey
+      );
+    });
   };
 
   const addToPlan = (defId: string) => {
@@ -413,55 +445,34 @@ export const Planner: React.FC<PlannerProps> = ({ content, onChange, bgColor }) 
   // --- DRAG & DROP ---
   // Note: Drag functionality removed - items are added via click only
 
-  // Slider drag handlers
-  const handleSliderMouseDown = (e: React.MouseEvent, instId: string) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDraggingSliderId(instId);
-    const sliderElement = sliderRefs.current.get(instId);
-    if (sliderElement) {
-      const rect = sliderElement.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const percentage = (x / rect.width) * 100;
-      handleSliderDrag(instId, data.selectedDay, percentage);
-    }
-  };
-
-  useEffect(() => {
-    if (!draggingSliderId) return;
-
-    const handleMouseMove = (e: MouseEvent) => {
-      const sliderElement = sliderRefs.current.get(draggingSliderId);
-      if (sliderElement) {
-        const rect = sliderElement.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const percentage = (x / rect.width) * 100;
-        handleSliderDrag(draggingSliderId, data.selectedDay, percentage);
-      }
-    };
-
-    const handleMouseUp = () => {
-      setDraggingSliderId(null);
-    };
-
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
-
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, [draggingSliderId]);
-
+  // Dynamic library width from grid units
+  const libraryWidthPx = useMemo(() => {
+    if (gridW < 16) return moduleWidthPx * 0.95;
+    if (gridW >= 17 && gridW <= 20) return moduleWidthPx * 0.80;
+    return moduleWidthPx * 0.50;
+  }, [gridW, moduleWidthPx]);
+  // #region agent log
+  if (typeof fetch !== 'undefined' && isLibraryExpanded) fetch('http://127.0.0.1:7242/ingest/3f4e8aca-fac0-4c36-9036-51ef87c3cc25',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'planner.tsx:libraryWidth',message:'library width calc',data:{gridW,moduleWidthPx,libraryWidthPx,bracket:gridW<16?'<16':gridW<=20?'17-20':'>20'},timestamp:Date.now(),sessionId:'debug',hypothesisId:'b1'})}).catch(()=>{});
+  // #endregion
   return (
     <div style={{ display: 'flex', height: '100%', position: 'relative', overflow: 'hidden', background: bgColor }}>
       
       {/* LEFT PANEL: Planned Tasks */}
       <div 
+        onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'copy'; }}
+        onDrop={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const text = e.dataTransfer.getData('todoItemText');
+          // #region agent log
+          if (typeof fetch !== 'undefined') fetch('http://127.0.0.1:7242/ingest/3f4e8aca-fac0-4c36-9036-51ef87c3cc25',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'planner.tsx:onDrop',message:'planner handleDrop',data:{todoItemText:text||'(empty)',types:Array.from(e.dataTransfer?.types||[])},timestamp:Date.now(),sessionId:'debug',hypothesisId:'b4'})}).catch(()=>{});
+          // #endregion
+          if (text) handleDropFromTodo(text);
+        }}
         style={{ 
           flex: 1, 
           padding: '10px', 
-          paddingRight: isLibraryExpanded ? 'calc(50% + 15px)' : 'calc(10% + 15px)', 
+          paddingRight: isLibraryExpanded ? `${libraryWidthPx}px` : 'calc(10% + 15px)', 
           overflowY: 'auto', 
           display: 'flex', 
           flexDirection: 'column', 
@@ -502,6 +513,13 @@ export const Planner: React.FC<PlannerProps> = ({ content, onChange, bgColor }) 
           return (
             <div 
               key={inst.id}
+              draggable
+        onDragStart={(e) => {
+          e.dataTransfer.setData('plannerItemName', def.text);
+          e.dataTransfer.effectAllowed = 'copyMove';
+          onDragStartItem?.();
+        }}
+              onDragEnd={() => onDragEndItem?.()}
               style={{ 
                 display: 'flex', 
                 flexDirection: 'column',
@@ -509,7 +527,8 @@ export const Planner: React.FC<PlannerProps> = ({ content, onChange, bgColor }) 
                 background: 'rgba(255,255,255,0.5)', 
                 padding: '6px 10px', 
                 borderRadius: '4px',
-                border: '1px solid rgba(0,0,0,0.1)'
+                border: '1px solid rgba(0,0,0,0.1)',
+                cursor: 'grab'
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -581,32 +600,26 @@ export const Planner: React.FC<PlannerProps> = ({ content, onChange, bgColor }) 
                 </button>
               </div>
               
-              {/* Slider progress bar */}
+              {/* Slider: native range input for reliable behavior */}
               {taskType === 'slider' && (
-                <div
-                  ref={(el) => {
-                    if (el) sliderRefs.current.set(inst.id, el);
-                    else sliderRefs.current.delete(inst.id);
-                  }}
-                  onMouseDown={(e) => handleSliderMouseDown(e, inst.id)}
-                  style={{
-                    height: '4px',
-                    background: '#e0e0e0',
-                    borderRadius: '2px',
-                    margin: '0 10px',
-                    position: 'relative',
-                    cursor: 'pointer'
-                  }}
-                >
-                  <div
+                <div style={{ margin: '0 10px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={Math.round(inst.completionPercentage ?? 0)}
+                    onChange={(e) => handleSliderDrag(inst.id, data.selectedDay, Number(e.target.value))}
                     style={{
-                      height: '100%',
-                      width: `${inst.completionPercentage || 0}%`,
-                      background: inst.done ? '#28a745' : '#007bff',
-                      borderRadius: '2px',
-                      transition: draggingSliderId === inst.id ? 'none' : 'width 0.1s ease'
+                      flex: 1,
+                      height: '10px',
+                      margin: 0,
+                      accentColor: inst.done ? '#28a745' : '#007bff',
+                      cursor: 'pointer'
                     }}
                   />
+                  <span style={{ fontSize: '9px', fontWeight: 600, color: '#333', minWidth: '28px' }}>
+                    {Math.round(inst.completionPercentage ?? 0)}%
+                  </span>
                 </div>
               )}
             </div>
@@ -618,7 +631,7 @@ export const Planner: React.FC<PlannerProps> = ({ content, onChange, bgColor }) 
       <div 
         className="planner-right-panel"
         style={{ 
-            width: isLibraryExpanded ? '50%' : '10%', 
+            width: isLibraryExpanded ? `${libraryWidthPx}px` : '10%', 
             height: '90%', 
             background: 'rgba(255, 255, 255, 0.95)', 
             borderLeft: '1px solid rgba(0,0,0,0.1)',
@@ -675,7 +688,15 @@ export const Planner: React.FC<PlannerProps> = ({ content, onChange, bgColor }) 
                     const taskType = def.type || 'one-off';
                     return (
                         <div 
-                            key={def.id} 
+                            key={def.id}
+                            draggable={editingDefId !== def.id}
+                            onDragStart={(e) => {
+                              if (editingDefId === def.id) return;
+                              e.dataTransfer.setData('plannerItemName', def.text);
+                              e.dataTransfer.effectAllowed = 'copyMove';
+                              onDragStartItem?.();
+                            }}
+                            onDragEnd={() => onDragEndItem?.()}
                             style={{ 
                                 display: 'flex', 
                                 flexDirection: 'column',
@@ -684,7 +705,7 @@ export const Planner: React.FC<PlannerProps> = ({ content, onChange, bgColor }) 
                                 padding: '5px', 
                                 borderRadius: '4px',
                                 border: '1px solid #eee', 
-                                cursor: 'default'
+                                cursor: editingDefId === def.id ? 'default' : 'grab'
                             }}
                         >
                             {editingDefId === def.id ? (

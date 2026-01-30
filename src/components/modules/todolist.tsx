@@ -13,12 +13,15 @@ interface TodoListProps {
   onEditTodo: (item: TodoItem) => void;
   onDeleteTodo: (id: string) => void;
   onMoveTodo: (itemId: string, targetModuleId: string) => void; 
-  onReorderTodo: (itemId: string, targetId: string | null, position: 'before' | 'after' | 'inside') => void; // New prop
+  onReorderTodo: (itemId: string, targetId: string | null, position: 'before' | 'after' | 'inside') => void;
+  onDragStartItem?: () => void;
+  onDragEndItem?: () => void;
 }
 
 export const TodoList: React.FC<TodoListProps> = ({ 
     moduleId, items, backgroundColor = 'white',
-    onAddTodo, onUpdateTodo, onEditTodo, onDeleteTodo, onMoveTodo, onReorderTodo
+    onAddTodo, onUpdateTodo, onEditTodo, onDeleteTodo, onMoveTodo, onReorderTodo,
+    onDragStartItem, onDragEndItem
 }) => {
   
   const [newItemText, setNewItemText] = useState('');
@@ -57,21 +60,32 @@ export const TodoList: React.FC<TodoListProps> = ({
       e.dataTransfer.setData('todoId', item.id);
       e.dataTransfer.setData('originId', moduleId);
       e.dataTransfer.setData('reorderId', item.id); // Add specific reorder flag
-      e.dataTransfer.effectAllowed = 'move';
-      e.stopPropagation(); 
+      e.dataTransfer.setData('todoItemText', item.text);
+      e.dataTransfer.effectAllowed = 'copyMove';
+      e.stopPropagation();
+      onDragStartItem?.();
   };
 
   const handleDragOver = (e: React.DragEvent) => {
-      e.preventDefault(); 
-      e.dataTransfer.dropEffect = 'move';
+      e.preventDefault();
+      e.dataTransfer.dropEffect = e.dataTransfer.types.includes('plannerItemName') ? 'copy' : 'move';
       e.stopPropagation();
   };
 
   const handleDrop = (e: React.DragEvent, targetId: string | null = null, position: 'before' | 'after' | 'inside' = 'after') => {
       e.preventDefault();
       e.stopPropagation();
+      const plannerItemName = e.dataTransfer.getData('plannerItemName');
       const todoId = e.dataTransfer.getData('todoId');
       const originId = e.dataTransfer.getData('originId');
+      // #region agent log
+      if (typeof fetch !== 'undefined') fetch('http://127.0.0.1:7242/ingest/3f4e8aca-fac0-4c36-9036-51ef87c3cc25',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'todolist.tsx:handleDrop',message:'todo handleDrop',data:{plannerItemName:plannerItemName||'(empty)',todoId:todoId||'(empty)',originId,moduleId},timestamp:Date.now(),sessionId:'debug',hypothesisId:'b4'})}).catch(()=>{});
+      // #endregion
+      if (plannerItemName) {
+          // Create new to-do from planner item
+          onAddTodo(plannerItemName);
+          return;
+      }
       
       if (!todoId) return;
 
@@ -250,6 +264,7 @@ export const TodoList: React.FC<TodoListProps> = ({
                 }}
                 draggable
                 onDragStart={(e) => handleDragStart(e, item)}
+                onDragEnd={() => onDragEndItem?.()}
                 onContextMenu={(e) => handleContextMenu(e, item)}
                 onClick={() => onEditTodo(item)}
                 onMouseDown={(e) => e.stopPropagation()} 

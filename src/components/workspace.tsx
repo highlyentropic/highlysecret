@@ -155,12 +155,16 @@ interface SortableModuleProps {
   reorderTodo: (draggedId: string, targetId: string | null, position: 'before' | 'after' | 'inside', moduleId: string) => void;
   handleEditEvent: (event: CalendarEvent) => void;
   openAddEventModal: (date?: Date) => void;
+  openAddEventModalForDrop: (date: Date, title: string) => void;
   setGlobalEvents: React.Dispatch<React.SetStateAction<CalendarEvent[]>>;
   maxRows: number;
   rowHeight: number;
   viewMode: 'free' | 'structured';
   todoModuleRefs: React.MutableRefObject<Map<string, HTMLDivElement>>;
   onHeightChange?: (moduleId: string, height: number) => void;
+  draggingTodoOrPlanner: boolean;
+  onDragStartItem: () => void;
+  onDragEndItem: () => void;
 }
 
 const SortableModule: React.FC<SortableModuleProps & { id: string }> = ({ id, ...props }) => {
@@ -173,10 +177,11 @@ const SortableModule: React.FC<SortableModuleProps & { id: string }> = ({ id, ..
     isDragging,
   } = useSortable({ id });
 
+  const greyOut = props.draggingTodoOrPlanner && !['todo', 'planner', 'calendar'].includes(props.item.type);
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
-    opacity: isDragging ? 0.5 : 1,
+    opacity: isDragging ? 0.5 : greyOut ? 0.4 : 1,
   };
 
   const { item, theme, maxRows, rowHeight, viewMode, todoModuleRefs, onHeightChange } = props;
@@ -363,13 +368,15 @@ const SortableModule: React.FC<SortableModuleProps & { id: string }> = ({ id, ..
               onDeleteTodo={props.deleteTodo} 
               onMoveTodo={props.moveTodo} 
               onReorderTodo={(dragId, targetId, pos) => props.reorderTodo(dragId, targetId, pos, item.i)}
+              onDragStartItem={props.onDragStartItem}
+              onDragEndItem={props.onDragEndItem}
             />
           )}
           
           {item.type === 'stickynote' && <StickyNote content={item.content || ''} onChange={(txt) => props.updateContent(item.i, { content: txt })} />}
           {item.type === 'events' && <EventsList events={props.allEvents} onAddClick={() => props.openAddEventModal()} onToggleNotify={(id) => props.setGlobalEvents(prev => prev.map(e => e.id === id ? { ...e, notify: !e.notify } : e))} backgroundColor={theme.body} />}
-          {item.type === 'calendar' && <Calendar events={props.allEvents} onDayClick={(date) => props.openAddEventModal(date)} backgroundColor={theme.body} />}
-          {item.type === 'planner' && <Planner content={item.content || ''} onChange={(data) => props.updateContent(item.i, { content: data })} bgColor={theme.body} />}
+          {item.type === 'calendar' && <Calendar events={props.allEvents} onDayClick={(date) => props.openAddEventModal(date)} onDropItemOnDay={(date, itemName) => props.openAddEventModalForDrop(date, itemName)} backgroundColor={theme.body} />}
+          {item.type === 'planner' && <Planner content={item.content || ''} onChange={(data) => props.updateContent(item.i, { content: data })} bgColor={theme.body} gridW={props.viewMode === 'structured' ? Math.min(item.w ?? 16, 15) : (item.w ?? 16)} moduleWidthPx={moduleWidth} onDragStartItem={props.onDragStartItem} onDragEndItem={props.onDragEndItem} />}
           {item.type === 'plannerCalendar' && (
             <PlannerCalendar
               content={item.content || ''}
@@ -502,6 +509,13 @@ export const Workspace = () => {
   const [editingTitleId, setEditingTitleId] = useState<string | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [paletteOpenId, setPaletteOpenId] = useState<string | null>(null);
+  const [draggingTodoOrPlanner, setDraggingTodoOrPlanner] = useState(false);
+
+  useEffect(() => {
+    const handleDragEnd = () => setDraggingTodoOrPlanner(false);
+    window.addEventListener('dragend', handleDragEnd);
+    return () => window.removeEventListener('dragend', handleDragEnd);
+  }, []);
 
   useEffect(() => {
     const handleResize = () => {
@@ -746,13 +760,19 @@ export const Workspace = () => {
   const onDrop = (layout: Layout[], layoutItem: Layout, event: Event) => {
     // FIX 1: If dragging a Todo Item, CANCEL module creation
     const dragEvent = event as unknown as React.DragEvent;
+    const types = dragEvent.dataTransfer?.types ? Array.from(dragEvent.dataTransfer.types) : [];
+    // #region agent log
+    if (typeof fetch !== 'undefined') fetch('http://127.0.0.1:7242/ingest/3f4e8aca-fac0-4c36-9036-51ef87c3cc25',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'workspace.tsx:onDrop',message:'grid onDrop',data:{types,hasTodoId:types.includes('todoId'),hasPlannerItemName:types.includes('plannerItemName'),hasTodoItemText:types.includes('todoItemText'),draggingType},timestamp:Date.now(),sessionId:'debug',hypothesisId:'b3'})}).catch(()=>{});
+    // #endregion
     if (dragEvent.dataTransfer && (
         dragEvent.dataTransfer.types.includes('todoId') || 
         dragEvent.dataTransfer.types.includes('reorderId') ||
-        dragEvent.dataTransfer.types.includes('plannerDefId') // Planner DnD check
+        dragEvent.dataTransfer.types.includes('plannerDefId') ||
+        dragEvent.dataTransfer.types.includes('plannerItemName') ||
+        dragEvent.dataTransfer.types.includes('todoItemText')
     )) {
          setIsDropping(false);
-         return; // Do NOT create a module
+         return; // Do NOT create a module (todo/planner item drag onto grid)
     }
 
     // Handle Restore from Minimized Drag
@@ -1028,6 +1048,11 @@ export const Workspace = () => {
       setModalData({ date: date ? date.toISOString() : new Date().toISOString(), title: '', startTime: '09:00', endTime: '10:00', location: '', color: '#007bff', notify: false, isAllDay: false }); 
       setShowModal(true); 
   };
+
+  const openAddEventModalForDrop = (date: Date, title: string) => {
+      setModalData({ date: date.toISOString(), title, startTime: '09:00', endTime: '10:00', location: '', color: '#007bff', notify: false, isAllDay: false });
+      setShowModal(true);
+  };
   
   const handleEditEvent = (event: CalendarEvent) => {
       setModalData({ ...event });
@@ -1154,10 +1179,11 @@ export const Workspace = () => {
   };
   
   const moveTodo = (itemId: string, targetModuleId: string) => {
-      // Recursive move
-      const getDescendants = (rootId: string, allItems: TodoItem[]): string[] => {
+      const getDescendants = (rootId: string, allItems: TodoItem[], visited = new Set<string>()): string[] => {
+          if (visited.has(rootId)) return [];
+          visited.add(rootId);
           const children = allItems.filter(i => i.parentId === rootId);
-          return [...children.map(c => c.id), ...children.flatMap(c => getDescendants(c.id, allItems))];
+          return [...children.map(c => c.id), ...children.flatMap(c => getDescendants(c.id, allItems, visited))];
       };
 
       setGlobalTodos(prev => {
@@ -1479,13 +1505,22 @@ export const Workspace = () => {
   };
 
   const handleDragEndStructured = (event: DragEndEvent) => {
+    if (draggingTodoOrPlanner) {
+      setActiveId(null);
+      setIsDragging(false);
+      return;
+    }
     const { active, over } = event;
     
     if (over && active.id !== over.id) {
       const sortedItems = getSortedItems();
       const oldIndex = sortedItems.findIndex(item => item.i === active.id);
       const newIndex = sortedItems.findIndex(item => item.i === over.id);
-      
+      if (oldIndex === -1 || newIndex === -1) {
+        setActiveId(null);
+        setIsDragging(false);
+        return;
+      }
       const reordered = arrayMove(sortedItems, oldIndex, newIndex);
       const updated = reordered.map((item, index) => ({
         ...item,
@@ -1847,8 +1882,9 @@ export const Workspace = () => {
           >
             {uniqueItems.map((item) => {
                const theme = THEMES[item.themeIndex || 0] || THEMES[0];
+               const greyOutFree = draggingTodoOrPlanner && !['todo', 'planner', 'calendar'].includes(item.type);
                return (
-              <div key={item.i} className="grid-item">
+              <div key={item.i} className="grid-item" style={{ opacity: greyOutFree ? 0.4 : 1, transition: 'opacity 0.2s ease' }}>
                 <div 
                   className="drag-handle" 
                   style={{ background: theme.header }}
@@ -1940,13 +1976,15 @@ export const Workspace = () => {
                           onDeleteTodo={deleteTodo} 
                           onMoveTodo={moveTodo} 
                           onReorderTodo={(dragId, targetId, pos) => reorderTodo(dragId, targetId, pos, item.i)}
+                          onDragStartItem={() => setDraggingTodoOrPlanner(true)}
+                          onDragEndItem={() => setDraggingTodoOrPlanner(false)}
                       />
                   )}
                   
                   {item.type === 'stickynote' && <StickyNote content={item.content || ''} onChange={(txt) => updateContent(item.i, { content: txt })} />}
                   {item.type === 'events' && <EventsList events={allEvents} onAddClick={() => openAddEventModal()} onToggleNotify={(id) => setGlobalEvents(prev => prev.map(e => e.id === id ? { ...e, notify: !e.notify } : e))} backgroundColor={theme.body} />}
-                  {item.type === 'calendar' && <Calendar events={allEvents} onDayClick={(date) => openAddEventModal(date)} backgroundColor={theme.body} />}
-                  {item.type === 'planner' && <Planner content={item.content || ''} onChange={(data) => updateContent(item.i, { content: data })} bgColor={theme.body} />}
+                  {item.type === 'calendar' && <Calendar events={allEvents} onDayClick={(date) => openAddEventModal(date)} onDropItemOnDay={(date, itemName) => openAddEventModalForDrop(date, itemName)} backgroundColor={theme.body} />}
+                  {item.type === 'planner' && <Planner content={item.content || ''} onChange={(data) => updateContent(item.i, { content: data })} bgColor={theme.body} gridW={item.w} moduleWidthPx={Math.round((1200 / COLS) * item.w)} onDragStartItem={() => setDraggingTodoOrPlanner(true)} onDragEndItem={() => setDraggingTodoOrPlanner(false)} />}
                   {item.type === 'plannerCalendar' && (
                     <PlannerCalendar
                       content={item.content || ''}
@@ -2043,19 +2081,23 @@ export const Workspace = () => {
                         reorderTodo={reorderTodo}
                         handleEditEvent={handleEditEvent}
                         openAddEventModal={openAddEventModal}
+                        openAddEventModalForDrop={openAddEventModalForDrop}
                         setGlobalEvents={setGlobalEvents}
                         maxRows={maxRows}
                         rowHeight={ROW_HEIGHT}
                         viewMode={viewMode}
                         todoModuleRefs={todoModuleRefs}
                         onHeightChange={handleTodoHeightChange}
+                        draggingTodoOrPlanner={draggingTodoOrPlanner}
+                        onDragStartItem={() => setDraggingTodoOrPlanner(true)}
+                        onDragEndItem={() => setDraggingTodoOrPlanner(false)}
                       />
                     );
                   })}
                 </div>
               </SortableContext>
               <DragOverlay>
-                {activeItem ? (
+                {activeItem && !draggingTodoOrPlanner ? (
                   <div
                     style={{
                       width: `${STRUCTURED_MODULE_WIDTHS[activeItem.type] || 300}px`,
